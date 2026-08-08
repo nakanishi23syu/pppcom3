@@ -25,6 +25,13 @@ infra/data/dicom-incoming/*
 *.db-shm
 *.db-wal
 
+# ===== E2Eテスト(tests/e2e/)の実行時出力 =====
+# Playwrightのスクリーンショット等。実行するたびに生成される使い捨てファイルのため、
+# リポジトリには含めない（tests/e2e/README.md参照）。
+tests/e2e/output/
+__pycache__/
+*.pyc
+
 # ===== 環境設定・秘密情報 =====
 .env
 .env.*

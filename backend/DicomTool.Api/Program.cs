@@ -90,8 +90,28 @@ builder.Services.Configure<FormOptions>(options =>
 // プロバイダ非依存に書かれているため、ここでUseNpgsqlに差し替えるだけで済む。
 // マイグレーションファイルもshared側に既に用意されている（同じテーブル定義をApi/Workerの
 // 2プロセスがそれぞれ持つとズレる事故が起きるため、shared 1箇所に集約している）。
-builder.Services.AddDbContext<DicomDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Dicom")));
+//
+// 【なぜ "Testing" 環境ではこの登録自体をスキップするのか】
+// backend/DicomTool.Api.Tests（結合テスト、WebApplicationFactory<Program>を使用）では、
+// 実PostgreSQLの代わりにEF Coreの InMemory プロバイダへ差し替えたい。
+// 一見、「後からInMemory版のAddDbContextを呼んで上書きすればいい」ように思えるが、
+// 実際にそれをやろうとすると、EF Coreは「同じDbContext型に対して、Npgsql用の内部サービスと
+// InMemory用の内部サービスの両方がDIコンテナに登録されている」状態を検知して
+// 例外を投げる（"Only a single database provider can be registered" という趣旨のエラー。
+// DbContextOptions<DicomDbContext>という「表向きの設定」だけ差し替えても、
+// UseNpgsql/UseInMemoryDatabaseそれぞれが裏側でDIコンテナに追加するプロバイダ固有の
+// サービス群までは綺麗に取り除けないため）。
+// そのため「そもそも本番用のNpgsql登録をテスト実行時には行わない」という、
+// 登録時点でのif分岐によって二重登録そのものを避けている。
+// IWebHostEnvironment.EnvironmentName を "Testing" にするのは
+// backend/DicomTool.Api.Tests/Infrastructure/DicomToolWebApplicationFactory.cs 側の役割で、
+// そちらが builder.UseEnvironment("Testing") を呼んだ上で、代わりにInMemory版の
+// AddDbContext呼び出しを行う（詳細は同ファイルのコメント参照）。
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddDbContext<DicomDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("Dicom")));
+}
 
 builder.Services.AddScoped<DicomTagRevertService>();
 
@@ -191,20 +211,37 @@ builder.Services
 // Temporal Clientへの接続（DIコンテナへSingleton登録）
 // ======================================================
 // docs/CONTRACT.md 4章の通り、Api/DicomScpは「ワークフローを起動する側」であって
-// 「ワークフローの中身を知っている側」ではない。TemporalClient.ConnectAsyncで接続を確立し、
-// ITemporalClient（起動用の型なしクライアントAPIを持つインターフェース）をSingletonとして
-// DIコンテナに登録しておくと、Mutation.csの各メソッドが[Service] ITemporalClientで
-// そのまま注入を受けられる。
-// 接続はTCP的な「張りっぱなしの通信路」を確立するだけの軽い処理で、DbContextのような
-// リクエストスコープの状態は持たないため、Singleton（アプリ全体で1個使い回す）で問題ない。
-// トップレベルステートメント(Program.cs)はコンパイラにより暗黙のasync Main()に変換されるため、
-// ここで直接awaitできる。
-var temporalAddress = builder.Configuration["Temporal:Address"] ?? "localhost:7233";
-var temporalClient = await TemporalClient.ConnectAsync(new(temporalAddress)
+// 「ワークフローの中身を知っている側」ではない。ITemporalClient（起動用の型なしクライアントAPIを
+// 持つインターフェース）をSingletonとしてDIコンテナに登録しておくと、Mutation.csの各メソッドが
+// [Service] ITemporalClientでそのまま注入を受けられる。
+//
+// 【ConnectAsyncではなくCreateLazyを使う理由】
+// Temporal .NET SDKには接続方法が2つある。
+//   - TemporalClient.ConnectAsync(...) … その場で実際にTemporal Serverへ接続を試み、
+//     失敗すれば例外を投げる（＝Api起動時点でTemporal Serverが必ず立っている必要がある）。
+//   - TemporalClient.CreateLazy(...)   … 接続確認をその場では行わず、実際にワークフローを
+//     起動する（StartWorkflowAsync等）が最初に呼ばれたタイミングまで接続を遅延する。
+// 以前はConnectAsyncを使っていたが、これだと「Api起動時に必ずTemporal Serverが応答する
+// 状態でなければアプリ全体が起動できない」という制約が生じる（Temporal Serverの起動が
+// Apiより遅れる運用に弱い）。CreateLazyであれば起動時のネットワーク疎通確認を行わないため、
+// Temporal Serverが後から起動する運用でもApiは先に起動できる。
+// 実際に接続できない場合の挙動は「次にそのクライアントが使われた時に再試行される」
+// （Temporal .NET SDKのCreateLazyのドキュメントコメントより）ため、本番運用上の安全性も変わらない。
+//
+// 【なぜ "Testing" 環境ではこの登録自体をスキップするのか】
+// 上のDicomDbContextと全く同じ理由。backend/DicomTool.Api.Tests では実Temporal Serverに
+// 接続する本物のITemporalClientをそもそもDIコンテナに登録させず、代わりに
+// NSubstituteで作った偽物(モック)だけを登録する（詳細はDicomToolWebApplicationFactory.cs参照）。
+// 二重登録を避けるため、ここでも登録自体をif分岐でスキップしている。
+if (!builder.Environment.IsEnvironment("Testing"))
 {
-    Namespace = TemporalConstants.Namespace,
-});
-builder.Services.AddSingleton<ITemporalClient>(temporalClient);
+    var temporalAddress = builder.Configuration["Temporal:Address"] ?? "localhost:7233";
+    var temporalClient = TemporalClient.CreateLazy(new(temporalAddress)
+    {
+        Namespace = TemporalConstants.Namespace,
+    });
+    builder.Services.AddSingleton<ITemporalClient>(temporalClient);
+}
 
 var app = builder.Build();
 
@@ -250,7 +287,27 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DicomDbContext>();
     var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
-    db.Database.Migrate();
+
+    // 【なぜMigrate()を無条件に呼ばないのか】
+    // Migrate()は「リレーショナルDB（テーブルやマイグレーション履歴という概念を持つDB）」
+    // 向けの操作で、本番/開発で使うPostgreSQL(Npgsql)ではこれで問題ない。
+    // 一方 backend/DicomTool.Api.Tests の結合テストでは、実PostgreSQLを用意しない代わりに
+    // EF Coreの InMemory プロバイダ（DBを使わずメモリ上だけで完結させるテスト用プロバイダ、
+    // 詳細はテストプロジェクト側のコメント参照）に差し替えている。InMemoryプロバイダは
+    // マイグレーションという概念自体を持たないため、Migrate()を呼ぶと
+    // 「InMemoryではサポートされていません」という例外で落ちてしまう。
+    // IsRelational()で「今使っているプロバイダがマイグレーションに対応した種類か」を判定し、
+    // 対応していない場合は EnsureCreated()（今のモデル定義から、その場で最低限のテーブル相当の
+    // 構造を作るだけの簡易メソッド）で代用する。
+    if (db.Database.IsRelational())
+    {
+        db.Database.Migrate();
+    }
+    else
+    {
+        db.Database.EnsureCreated();
+    }
+
     DbSeeder.SeedIfEmpty(db, authService);
 }
 
@@ -262,3 +319,17 @@ using (var scope = app.Services.CreateScope())
 app.MapGraphQL();
 
 app.Run();
+
+// ======================================================
+// public partial class Program
+// ======================================================
+// トップレベルステートメント（このファイルのように usingの後いきなり文を書けるC#の書き方）で
+// 書かれたエントリーポイントは、コンパイラが裏側で自動生成する非公開(internal)の
+// `Program` というクラスの `Main` メソッドに変換される。
+// backend/DicomTool.Api.Tests の結合テストでは、このApiプロジェクトを丸ごと
+// `WebApplicationFactory<Program>`（ASP.NET Coreアプリをテスト用にメモリ上で起動する仕組み）
+// に渡す必要があるが、テストプロジェクトは別アセンブリのため、コンパイラ生成のままの
+// internalな`Program`を参照できない。この1行を明示的に書き足すことで、
+// 「同じ名前のPartial（分割）クラス」としてpublicに昇格させ、外部アセンブリから参照可能にしている
+// （中身は空でよい。コンパイラが生成する方のPartialクラスと合体するだけ）。
+public partial class Program { }

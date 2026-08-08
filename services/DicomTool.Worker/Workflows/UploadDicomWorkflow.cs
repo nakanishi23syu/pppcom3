@@ -59,6 +59,38 @@ public class UploadDicomWorkflow
             "UploadDicomWorkflowを開始します: StagingFileName={StagingFileName}, SourceProtocol={SourceProtocol}",
             input.StagingFileName, input.SourceProtocol);
 
+        // ── ⓪ CheckStorageCapacityActivity ──
+        // 「保存先ストレージの空き容量が足りているか」を、他のどの処理よりも先にチェックする。
+        //
+        // 【なぜ一番最初に置くのか】
+        // SaveToStorageActivity(ファイル解析・正式ストレージへの書き込み)やRegisterDicomRecordActivity
+        // (DB登録)は、いずれも「一度始めたら中途半端な状態を後始末する必要が出てくる」処理である
+        // (例: ファイルだけ書き込まれてDB登録は失敗した、等)。容量不足という「そもそも今回の
+        // アップロードを受け付けるべきではない」状況であれば、そういった後始末が必要な処理へ
+        // 進む前に、できるだけ早い段階で弾いてしまうのが安全かつ無駄がない
+        // ("fail fast"の考え方。docs/CONTRACT.md 2章のActivity分割の設計思想とも一致する)。
+        //
+        // 実際の判定ロジックは別プロセス(services/DicomTool.StorageGuard)が持っており、
+        // このActivity(Activities/CheckStorageCapacityActivity.cs)はそこへHTTPで問い合わせる
+        // だけの薄いアダプター。容量不足の場合はApplicationFailureException(nonRetryable: true)が
+        // 投げられ、以下のRetryPolicyに関わらずワークフローは即座に失敗する。
+        //   - StorageGuardサービスへの接続自体が一時的に失敗するケース(サービス再起動中等)は
+        //     「時間を置けば直るかもしれない」障害のため、SaveToStorageActivityと同様の
+        //     Retry設定(最大5回・指数バックオフ)にしている。
+        await Workflow.ExecuteActivityAsync(
+            (CheckStorageCapacityActivity act) => act.CheckAsync(),
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromSeconds(30),
+                RetryPolicy = new RetryPolicy
+                {
+                    InitialInterval = TimeSpan.FromSeconds(2),
+                    BackoffCoefficient = 2.0F,
+                    MaximumInterval = TimeSpan.FromSeconds(30),
+                    MaximumAttempts = 5,
+                },
+            });
+
         // ── ① SaveToStorageActivity ──
         // ステージング領域のファイルをfo-dicomで解析し、正式ストレージへ移動する。
         //

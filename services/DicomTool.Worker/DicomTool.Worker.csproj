@@ -27,6 +27,14 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
 
     <!--
+      Microsoft.Extensions.Http ― IHttpClientFactoryをGeneric HostのDIコンテナに統合するための
+      拡張パッケージ。CheckStorageCapacityActivity(Activities/CheckStorageCapacityActivity.cs)が
+      別プロセス(services/DicomTool.StorageGuard)へHTTPで問い合わせる際に使う、名前付きHttpClientの
+      生成・使い回しを面倒みてもらうために追加した(Program.csのAddHttpClient(...)呼び出し参照)。
+    -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+
+    <!--
       Temporalio ― Temporal .NET SDK 本体（Workflow/Activity属性、TemporalClient等）。
       Temporalio.Extensions.Hosting ― Generic Host(IHostBuilder)にTemporal Workerを
       IHostedServiceとして統合するための拡張パッケージ。

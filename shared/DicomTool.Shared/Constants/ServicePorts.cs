@@ -31,6 +31,9 @@ public static class ServicePorts
     /// <summary>DICOM SCPサービスの管理用REST API（Swagger UI含む）のポート。</summary>
     public const int DicomScpManagementHttp = 8090;
 
+    /// <summary>StorageGuardサービス（保存先ストレージの空き容量チェック、Swagger UI含む）のHTTP APIポート。</summary>
+    public const int StorageGuardHttp = 8095;
+
     /// <summary>PostgreSQLのポート（docker-compose.yml参照）。</summary>
     public const int PostgresHost = 5432;
 

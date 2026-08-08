@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    ======================================================
+    DicomTool.StorageGuard ― 保存先ストレージの空き容量を監視するマイクロサービス
+    ======================================================
+    【なぜこれを既存サービス(Worker等)に混ぜず、わざわざ独立したマイクロサービスにしたのか】
+    詳しい設計意図はProgram.cs冒頭のコメントにまとめてあるが、要点だけここにも書いておく:
+      1. 「容量チェック」は UploadDicomWorkflow だけでなく、将来 DeleteDicomWorkflow や
+         他のバッチ処理からも同じロジックで呼びたくなる可能性が高い、独立した責務である。
+      2. VM上で「常に常駐して監視する」という性質(将来的にはアラート送信等に発展しうる)は、
+         Temporal Workflow/Activityの実行タイミングとは無関係にいつでも状態を答えられる
+         べきものであり、Workerのライフサイクル(Temporal Task Queueのポーリング)に
+         引きずられない別プロセスにしておく方が自然。
+      3. DicomTool.DicomScpと同様、「1プロセス1つのHTTP管理APIを持つ常駐サービス」という
+         型に揃えることで、学習用リポジトリ全体のサービス構成パターンを統一している。
+
+    DicomTool.DicomScpの管理用REST API(ポート8090)と同じ構成
+    (ASP.NET Core Minimal API + Swashbuckle(Swagger UI))を踏襲する。
+    このプロジェクトはDIMSE等の特殊な待受は持たず、素直な1つのHTTP APIのみを提供する。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Swaggerがコントローラ/エンドポイントのXMLコメントを拾えるようにする（任意だが学習用に有用）。 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 管理用REST APIのSwagger UI(OpenAPI仕様書自動生成)用。DicomScpと同じバージョンに揃える。 -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- shared/DicomTool.Shared … ポート番号(ServicePorts)・ストレージパス解決ロジック(StoragePaths)を
+         他サービスと共有するための参照。
+         ※ shared配下のファイルは他エージェントも参照する共有基盤のため一切変更しないこと
+         （今回の変更でもServicePorts.csへのポート追記以外は一切手を加えていない）。 -->
+    <ProjectReference Include="..\..\shared\DicomTool.Shared\DicomTool.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

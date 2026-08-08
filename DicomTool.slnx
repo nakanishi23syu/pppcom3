@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/backend/">
     <Project Path="backend/DicomTool.Api/DicomTool.Api.csproj" />
+    <Project Path="backend/DicomTool.Api.Tests/DicomTool.Api.Tests.csproj" />
   </Folder>
   <Folder Name="/frontend/" />
   <Folder Name="/frontend/timeline/">

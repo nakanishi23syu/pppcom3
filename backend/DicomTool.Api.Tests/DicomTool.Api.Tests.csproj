@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- テストプロジェクト自体はNuGetパッケージとして配布しないのでIsPackableはfalseにする。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      DicomTool.Api（本体プロジェクト）そのものをテストする「結合テスト」なので、
+      本体プロジェクトを直接参照する。この参照があることで、Microsoft.AspNetCore.Mvc.Testing
+      パッケージのビルドターゲットが自動的に「DicomTool.Apiのビルド成果物一式（appsettings.json等）
+      が実際どこに配置されているか」を示すマーカーファイルを生成し、
+      WebApplicationFactory<Program>がテスト実行時にそれを見つけて正しいContentRootを
+      推測できるようになる（詳細はInfrastructure/DicomToolWebApplicationFactory.cs参照）。
+    -->
+    <ProjectReference Include="..\DicomTool.Api\DicomTool.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- xUnit … このプロジェクトで使うテストフレームワーク本体。 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!--
+      Microsoft.AspNetCore.Mvc.Testing … WebApplicationFactory<T>を提供するパッケージ。
+      「本物のASP.NET Coreアプリを、実際にポートをlistenさせずメモリ上のTestServerとして
+      丸ごと起動し、HttpClient経由でHTTPリクエストを送って検証する」という結合テストの
+      土台になる。詳細はInfrastructure/DicomToolWebApplicationFactory.cs冒頭のコメント参照。
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
+
+    <!--
+      Microsoft.EntityFrameworkCore.InMemory … EF Coreの「テスト専用」プロバイダ。
+      本番/開発で使っているNpgsql(PostgreSQL)プロバイダの代わりにこれを使うと、
+      実際のPostgreSQLサーバーを1台も立てずに「DbContext経由の読み書き」を検証できる。
+      中身はプロセスのメモリ上に保持される簡易的なコレクションであり、SQLも発行されない。
+      あくまで「EF Core経由のコード（LINQクエリなど）が正しく書けているか」を確認するための
+      道具であり、「本物のPostgreSQL固有の挙動（SQLの方言、トランザクション分離レベル等）」の
+      検証はできない、という限界がある点に注意（詳細はDicomToolWebApplicationFactory.cs参照）。
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.9" />
+
+    <!--
+      NSubstitute … 「モック」（本物の代わりに差し込む偽物のオブジェクト）を簡単に作るための
+      ライブラリ。このプロジェクトでは、実際のTemporal Serverに接続する ITemporalClient の
+      代わりに「呼ばれたら何もせず成功したフリをする偽物」を作るのに使う
+      （詳細はInfrastructure/DicomToolWebApplicationFactory.cs、
+      UploadDicomFilesMutationTests.cs のコメント参照）。
+    -->
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+  </ItemGroup>
+
+</Project>

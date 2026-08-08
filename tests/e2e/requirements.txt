@@ -1,0 +1,8 @@
+# tests/e2e/ を実行するために必要なPythonパッケージ。
+# インストール方法: pip install -r tests/e2e/requirements.txt
+# (併せて `playwright install chromium` の実行も必要。詳細はREADME.md参照)
+
+pytest>=8.0
+playwright>=1.40
+pydicom>=2.4
+numpy>=1.24

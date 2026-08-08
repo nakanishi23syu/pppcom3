@@ -38,6 +38,25 @@ builder.Services.AddDbContext<DicomDbContext>(options => options.UseNpgsql(conne
 // 適用しておく必要がある、という起動順の前提がここにある）。
 
 // ------------------------------------------------------
+// 1.5. StorageGuardサービス呼び出し用の名前付きHttpClientのDI登録
+// ------------------------------------------------------
+// CheckStorageCapacityActivity(Activities/CheckStorageCapacityActivity.cs)が、
+// 保存先ストレージの容量チェックを行う別プロセス(services/DicomTool.StorageGuard)へ
+// HTTP経由で問い合わせるために使う。AddHttpClient(...)はIHttpClientFactoryを
+// DIコンテナに登録し、名前ごとにHttpClientの生成・使い回し・ソケット管理を面倒みてくれる
+// (毎回 new HttpClient() するとソケット枯渇の原因になるため、これがASP.NET Core/Genericホストの定石)。
+// BaseAddressはappsettings.json の StorageGuard:BaseUrl から読み、未設定時は
+// StorageGuardの既定ポート(ServicePorts.StorageGuardHttp)を指すlocalhostにフォールバックする
+// (Worker/StorageGuardは同じVM内で完結する想定のためlocalhost固定でよいが、
+//  念のため設定で上書きできるようにしている)。
+var storageGuardBaseUrl = builder.Configuration["StorageGuard:BaseUrl"]
+    ?? $"http://localhost:{ServicePorts.StorageGuardHttp}";
+
+builder.Services.AddHttpClient(
+    CheckStorageCapacityActivity.StorageGuardHttpClientName,
+    client => client.BaseAddress = new Uri(storageGuardBaseUrl));
+
+// ------------------------------------------------------
 // 2. Temporal Worker のDI登録
 // ------------------------------------------------------
 // Temporalio.Extensions.Hosting パッケージが提供する AddHostedTemporalWorker(...) は、
@@ -66,6 +85,7 @@ builder.Services
     // Temporal .NET SDKは「Activity呼び出し1回ごとに新しいDIスコープを作り、
     // 呼び出し終了時に破棄する」ため、ASP.NET Coreの「HTTPリクエスト1回ごとに
     // 新しいDIスコープ」と同じ感覚でDbContextを安全に使い回せる。
+    .AddScopedActivities<CheckStorageCapacityActivity>()
     .AddScopedActivities<SaveToStorageActivity>()
     .AddScopedActivities<RegisterDicomRecordActivity>()
     .AddScopedActivities<DeleteFromStorageActivity>()

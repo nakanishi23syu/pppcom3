@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/DicomTool.DicomScp/DicomTool.DicomScp.csproj" />
+    <Project Path="services/DicomTool.StorageGuard/DicomTool.StorageGuard.csproj" />
     <Project Path="services/DicomTool.TrayApp/DicomTool.TrayApp.csproj" />
     <Project Path="services/DicomTool.Worker/DicomTool.Worker.csproj" />
   </Folder>

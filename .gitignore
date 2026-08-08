@@ -40,6 +40,9 @@ deploy.txt
 !.vscode/extensions.json
 *.swp
 
+# ===== Claude Code サブエージェント用worktree =====
+.claude/worktrees/
+
 # ===== OS =====
 Thumbs.db
 .DS_Store

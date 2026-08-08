@@ -1,0 +1,45 @@
+# ===== .NET =====
+bin/
+obj/
+publish/
+*.user
+*.suo
+
+# ===== Node / Nuxt =====
+node_modules/
+.nuxt/
+.output/
+.nitro/
+.cache/
+dist/
+
+# ===== Blazor =====
+**/wwwroot/_framework/
+
+# ===== ローカル実行時データ（DICOM実ファイル・SQLite等） =====
+infra/data/dicom-storage/*
+!infra/data/dicom-storage/.gitkeep
+infra/data/dicom-incoming/*
+!infra/data/dicom-incoming/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+
+# ===== 環境設定・秘密情報 =====
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+
+# VMへのデプロイ用WinSCPスクリプト（VMのログインパスワードが平文で入っている）
+deploy.txt
+
+# ===== IDE =====
+.vs/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ===== OS =====
+Thumbs.db
+.DS_Store

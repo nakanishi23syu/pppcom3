@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    ======================================================
+    DicomTool.DicomScp ― DICOM SCU/SCPサービス
+    ======================================================
+    1つのプロセスの中に、性質の異なる2つの「待受」を同居させているのがこのプロジェクトの特徴。
+
+    ① DIMSE(DICOM Message Service Element)リスナー … TCPポート 11112
+       外部モダリティ（レントゲン装置・CT等）や、このリポジトリ自身のSCU自己疎通テストから
+       C-ECHO/C-STOREを受け付ける、DICOM Upper Layer Protocolに従う独自バイナリプロトコル。
+       fo-dicomライブラリの DicomServer が面倒を見てくれる（詳細は Services/DicomScpService.cs）。
+
+    ② 管理用REST API … HTTPポート 8090
+       ①の状態確認や自己疎通テストの実行を、普段使い慣れたHTTP+JSONで行うための「人間向け」の窓口。
+       ASP.NET Core Minimal API + Swashbuckle(Swagger UI)で構成する。
+
+    ASP.NET Coreの Generic Host は「複数のバックグラウンドサービス(IHostedService)を1プロセス内で
+    同時に起動する」ことを前提に設計されているため、①をBackgroundServiceとして登録するだけで、
+    ②の通常のWebサーバー起動処理と共存できる（Program.cs参照）。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Swaggerがコントローラ/エンドポイントのXMLコメントを拾えるようにする（任意だが学習用に有用）。 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- fo-dicom: C#向け標準DICOM通信ライブラリ(MS-PLライセンス)。
+         DICOM Upper Layer Protocol・DIMSEサービス(C-ECHO/C-STORE等)・
+         アソシエーション管理・転送構文の符号化/復号化を一手に引き受けてくれる。 -->
+    <PackageReference Include="fo-dicom" Version="5.2.6" />
+
+    <!-- 管理用REST APIのSwagger UI(OpenAPI仕様書自動生成)用。 -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+
+    <!-- Temporal .NET SDK。docs/CONTRACT.md 4章の「型なしクライアントAPI」で
+         UploadDicomWorkflowを起動するために使う（Workflow実装本体はServices/DicomTool.Workerが持つ）。 -->
+    <PackageReference Include="Temporalio" Version="1.17.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- shared/DicomTool.Shared … AEタイトル/ポート/ストレージパス/Temporal識別子の定数と、
+         Temporalワークフロー入力DTO(UploadDicomWorkflowInput)を共有するための参照。
+         ※ shared配下のファイルは他エージェントも参照する共有基盤のため一切変更しないこと。 -->
+    <ProjectReference Include="..\..\shared\DicomTool.Shared\DicomTool.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 自己疎通テスト(C-STORE)で使うサンプルDICOMファイルを、ビルド出力にそのままコピーする。 -->
+    <None Include="SampleData\**\*.dcm">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

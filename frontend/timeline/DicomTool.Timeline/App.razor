@@ -1,0 +1,16 @@
+@*
+    ======================================================
+    App.razor — アプリのルートコンポーネント
+    ======================================================
+    dicom-tool-2版はここでログイン状態の復元（AuthState.RestoreSessionAsync）を行っていたが、
+    Timelineは認証不要の閲覧専用画面として切り出したため、その処理は持たない
+    （patientTimelineクエリ自体がbackend側で未ログインでも呼べる想定。将来Timelineにも
+    認証を掛ける場合は、ここに元のAuthState復元処理を戻す形になる）。
+*@
+
+<Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+</Router>

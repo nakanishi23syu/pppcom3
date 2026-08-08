@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ======================================================
+    DicomTool.Shared ― 全C#サービス共通のクラスライブラリ
+    ======================================================
+    backend/DicomTool.Api と services/DicomTool.Worker の両方がこのプロジェクトを参照する。
+    「EF CoreのエンティティとDbContextを2つのプロセスがそれぞれ別々に書く」と、
+    片方だけスキーマを変更してズレる事故が起きるため、テーブル定義の "唯一の正" をここに集約する。
+
+    services/DicomTool.DicomScp と services/DicomTool.TrayApp はDB定義を直接は必要としないが、
+    Temporalワークフローの入力DTO（Contracts/配下）とポート/AEタイトル等の定数（Constants/配下）を
+    参照するため、こちらも同じくこのプロジェクトを参照する。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PostgreSQL用のEF Coreプロバイダ。dicom-toolのSqliteから乗り換える中核パッケージ。 -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

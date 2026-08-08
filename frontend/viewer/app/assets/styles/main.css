@@ -1,0 +1,31 @@
+/* ======================================================
+   main.css — グローバルCSSリセット・基本設定
+   ======================================================
+   Vue版 frontend/src/App.vue の <style>（scopedなし）に書かれていたグローバルスタイルの移植。
+   Nuxtではコンポーネント（app.vue）にscopedなし<style>を書くこともできるが、
+   「アプリ全体に適用されるCSS」という性質上、theme.cssと同様にnuxt.config.tsのcssへ
+   列挙する専用ファイルとして切り出す方が置き場所として分かりやすいため、ここに独立させている。
+*/
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+#__nuxt {
+  /* Nuxtがマウントするルート要素のid。Vue版の #app に相当する。 */
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}

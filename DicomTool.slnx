@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/DicomTool.Api/DicomTool.Api.csproj" />
+  </Folder>
+  <Folder Name="/frontend/" />
+  <Folder Name="/frontend/timeline/">
+    <Project Path="frontend/timeline/DicomTool.Timeline/DicomTool.Timeline.csproj" />
+  </Folder>
+  <Folder Name="/services/">
+    <Project Path="services/DicomTool.DicomScp/DicomTool.DicomScp.csproj" />
+    <Project Path="services/DicomTool.TrayApp/DicomTool.TrayApp.csproj" />
+    <Project Path="services/DicomTool.Worker/DicomTool.Worker.csproj" />
+  </Folder>
+  <Folder Name="/shared/">
+    <Project Path="shared/DicomTool.Shared/DicomTool.Shared.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ======================================================
+    DicomTool.TrayApp ― OSタスクトレイ常駐アプリ
+    ======================================================
+    docs/CONTRACT.md 1章の通り、このサービスはポート5299(ServicePorts.TrayAppHttp)で
+    ローカルHTTP APIを待ち受け、Worklist(3100)からの「Timelineを開いてほしい」という
+    命令を受け取ってOSのデフォルトブラウザでTimeline(5230)を開く「橋渡し役」。
+
+    なぜWinFormsアプリとして作るのか（＝なぜただのHTTPサーバーではダメなのか）:
+    実務のブラウザは強いサンドボックスの中で動いており、JavaScriptから
+    「任意のプロセスを起動する」「別ポートの別アプリを新しいウィンドウ/タブで開く」
+    といった操作を直接行うことはできない（セキュリティ上意図的に禁止されている）。
+    そこでDiscordやLINEのように「OSに常駐する小さなネイティブアプリ」を用意し、
+    ブラウザ側はそのアプリが待ち受けるlocalhostのHTTP APIにfetchするだけにする。
+    常駐アプリ側がOSのネイティブAPI(Process.Start)を使ってブラウザで別URLを開く、
+    という一段のクッションを挟むことで、ブラウザのサンドボックス制約を回避しつつ
+    「ユーザーの許可を得て動く常駐エージェント」という一般的なデスクトップ連携パターンを学ぶ。
+
+    net10.0-windows + UseWindowsForms=true としているのは、タスクトレイアイコン
+    (System.Windows.Forms.NotifyIcon)がWindows専用APIであり、WinFormsまたはWPFの
+    どちらかのUIフレームワークに依存する必要があるため。ここでは学習コストの低い
+    WinFormsを採用する。
+  -->
+
+  <PropertyGroup>
+    <!-- タスクトレイ常駐アプリはコンソールウィンドウを表示する必要がないため WinExe を指定する -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>DicomTool.TrayApp</AssemblyName>
+    <RootNamespace>DicomTool.TrayApp</RootNamespace>
+    <!-- 高DPI環境でタスクトレイアイコンがぼやけないようにする -->
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      本プロジェクトは Microsoft.NET.Sdk (WinForms向け) を使っており、
+      Microsoft.NET.Sdk.Web のように ASP.NET Core の共有フレームワークが
+      自動では参照されない。WebApplication / Minimal API / Kestrel などを
+      使うために明示的に FrameworkReference で追加する。
+      これにより「WinFormsアプリの中にASP.NET Coreサーバーを同居させる」が
+      1つのcsprojで成立する。
+    -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Minimal API に Swagger(OpenAPI) UI を生やすためのパッケージ。
+      執筆時点(2026-08)でNuGet上の最新は10.2.3系。
+    -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      ポート番号(ServicePorts.TrayAppHttp / ServicePorts.TimelineBlazor)などの
+      "唯一の正"となる定数を共有するため、Sharedプロジェクトを参照する。
+      docs/CONTRACT.md 1章の通り、ポート番号をこのプロジェクト内にベタ書きしないこと。
+    -->
+    <ProjectReference Include="..\..\shared\DicomTool.Shared\DicomTool.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

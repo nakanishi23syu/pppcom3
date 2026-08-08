@@ -1,0 +1,36 @@
+@*
+    ======================================================
+    SeriesViewerLinks.razor — 検査カード内の「画像を表示」ボタン列
+    ======================================================
+    Timeline.razor の比較読影セクション（選択中カード／直前検査カードの2箇所）から
+    再利用される小さな子コンポーネント。Seriesの一覧と「開くときに呼ぶコールバック」
+    (OnOpenViewer) だけを受け取る、状態を持たない表示専用コンポーネント。
+
+    実際に別タブでViewerを開く処理（IJSRuntime.InvokeVoidAsyncでのwindow.open呼び出し）は
+    親のTimeline.razor側に置いている。理由は、ページ内で複数箇所からViewerを開く導線が
+    増えても「別タブで開く」というブラウザAPIとの結合点は1箇所にまとめておきたいため
+    （このコンポーネント自体はIJSRuntimeを知らなくてよい）。
+*@
+@using DicomTool.Timeline.Models
+
+<ul class="series-list">
+    @foreach (var s in Series)
+    {
+        <li class="series-item" @key="s.SeriesInstanceUid">
+            <span class="series-desc">@(string.IsNullOrEmpty(s.SeriesDescription) ? "(説明なし)" : s.SeriesDescription)</span>
+            <span class="series-meta">@s.Modality・@(s.Sops.Count)枚</span>
+            <button type="button" class="viewer-link-button"
+                    title="Viewer（別アプリ）で画像を新しいタブに開きます"
+                    @onclick="() => OnOpenViewer.InvokeAsync(s.SeriesInstanceUid)">
+                画像を表示 ↗
+            </button>
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter] public List<GraphQLSeries> Series { get; set; } = new();
+
+    /// <summary>クリックされたSeriesのSeriesInstanceUidを引数に呼ばれるコールバック。</summary>
+    [Parameter] public EventCallback<string> OnOpenViewer { get; set; }
+}

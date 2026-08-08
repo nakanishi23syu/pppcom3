@@ -1,0 +1,26 @@
+{
+  "name": "worklist",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "predev": "node scripts/check-dev-port.mjs",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "^1.0.1",
+    "dicom.ts": "^1.3.0",
+    "nuxt": "^4.5.0",
+    "pinia": "^4.0.2",
+    "vue": "^3.5.40",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.8"
+  }
+}

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <!--
+    ======================================================
+    DicomTool.Timeline — 患者タイムライン表示 (Blazor WebAssembly)
+    ======================================================
+    dicom-tool-2/blazor/DicomTool.Blazor からの移植プロジェクト。
+    移植元は「検査一覧・アップロード・簡易ビューア・ログイン」まで含む1枚岩のBlazorアプリだったが、
+    dicom-tool-3ではそれぞれが別サービス（Worklist=Nuxt3, Viewer=Nuxt3, backend/DicomTool.Api）として
+    独立するため、このプロジェクトは docs/CONTRACT.md が定める「Timeline」の役割
+    （患者タイムライン表示。frontend/timeline, ポート5230）だけを持つ。
+
+    あえて DicomTool.Shared（EF Core/Npgsqlを含む共有クラスライブラリ）を参照しないのは、
+    Blazor WebAssemblyはブラウザ上のWASMサンドボックスで動くため、サーバー専用の
+    ソケット通信等に依存するライブラリを参照するとビルド/実行が壊れるため
+    （詳細は Constants/ExternalServiceUrls.cs のコメント参照）。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.8" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "DicomTool.DicomScp": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "//_comment": "ここで指定するURLは管理用REST APIのポート。実際の待受設定はProgram.cs内でShared.Constants.ServicePorts.DicomScpManagementHttpを参照してUseUrlsしている。DIMSEポート(11112)はASP.NET CoreのURLではなく、fo-dicomのDicomServerが独自にTCPで待ち受ける。",
+      "applicationUrl": "http://localhost:8090"
+    }
+  }
+}

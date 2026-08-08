@@ -1,0 +1,83 @@
+/* ======================================================
+   theme.css — アプリ全体のカラーテーマ定義
+   ======================================================
+   dicom-tool-2/blazor/DicomTool.Blazor の同名ファイルの移植。
+   CSS変数（カスタムプロパティ）の仕組みはブラウザ標準の機能なので、技術スタックが変わっても
+   資産としてそのまま持ち運べる。
+*/
+
+:root {
+  /* ── 背景色 ── */
+  --color-bg: #0d1117;
+  --color-surface: #111827;
+  --color-surface-alt: #1a2133;
+
+  /* ── 境界線 ── */
+  --color-border: #1e2535;
+  --color-border-strong: #2a3f5f;
+
+  /* ── テキスト ── */
+  --color-text: #c8d6e5;
+  --color-text-heading: #e2e8f0;
+  --color-text-muted: #8b9ab3;
+  --color-text-faint: #4a5a70;
+  --color-text-disabled: #566475;
+
+  /* ── アクセントカラー ── */
+  --color-accent: #7eb8f7;
+  --color-accent-bg: #1e2d45;
+  --color-accent-bg-hover: #243550;
+  --color-accent-selected-bg: #1a3a5c;
+  --color-thumbnail-selected-bg: #1e2e44;
+  --color-thumbnail-selected-border: #3b6ea8;
+
+  /* ── 状態色 ── */
+  --color-success: #4ade80;
+  --color-success-bg: #16281c;
+  --color-success-border: #2a5c3a;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+  --color-danger-bg: #2a1a1a;
+  --color-danger-border: #5c2a2a;
+
+  /* ── その他アクセント ── */
+  --color-purple: #a78bfa;
+  --color-purple-bg: #1f1a2e;
+  --color-purple-border: #3a2f5f;
+  --color-purple-code-bg: #2a2440;
+  --color-purple-code-text: #d6c9ff;
+
+  /* ── 画像ビューア専用（このプロジェクトでは未使用。Viewerは別サービスのため） ── */
+  --color-canvas-bg: #000;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+button {
+  font-family: inherit;
+}

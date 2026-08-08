@@ -1,0 +1,190 @@
+/* ======================================================
+   Timeline.razor.css — Timeline.razor 専用スタイル
+   ======================================================
+   dicom-tool-2/blazor/DicomTool.Blazor の同名ファイルの移植 + Viewer連携ボタン用のスタイルを追加。
+
+   【scoped CSSについて】末尾に .series-list / .series-item / .viewer-link-button を追加しているが、
+   これらは実際には子コンポーネント SeriesViewerLinks.razor 側のDOMに適用される。
+   Blazorの *.razor.css は既定では自コンポーネントの要素にしかスコープされないため、
+   本来ならスタイルは SeriesViewerLinks.razor.css 側に置くべきだが、Timeline画面専用の
+   小さな装飾でありファイルを増やすほどでもないため、`::deep` セレクタを使って
+   親（Timeline.razor）側からあえて子コンポーネントの内部要素にスタイルを浸透させている。
+*/
+
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+
+.page-header {
+  padding: 1.25rem 1.5rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.back-link {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: var(--color-accent);
+  text-decoration: none;
+  margin-bottom: 0.5rem;
+}
+.back-link:hover { text-decoration: underline; }
+
+.page-header h1 { margin: 0; font-size: 1.2rem; color: var(--color-text-heading); }
+
+.patient-line { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--color-text-muted); }
+.patient-line code { background: var(--color-bg); padding: 1px 4px; border-radius: 3px; color: var(--color-accent); }
+
+.page-main { flex: 1; padding: 1.5rem; }
+
+.status-line { font-size: 0.85rem; color: var(--color-text-muted); }
+.status-line.error { color: var(--color-danger); }
+
+.empty-state { text-align: center; padding: 3rem 1rem; color: var(--color-text-muted); font-size: 0.88rem; }
+.empty-state .hint { margin-top: 0.5rem; font-size: 0.8rem; }
+.empty-state a { color: var(--color-accent); }
+
+/* ── 横型タイムライングリッド ── */
+.timeline-grid {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+}
+
+.axis-row, .modality-row { display: flex; align-items: center; min-height: 2.6rem; }
+
+.axis-row { border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem; margin-bottom: 0.25rem; }
+
+.modality-row + .modality-row { border-top: 1px solid var(--color-border); }
+
+.row-label { width: 110px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+
+.row-modality { font-size: 0.82rem; font-weight: 600; color: var(--color-text-heading); }
+.row-count { font-size: 0.68rem; color: var(--color-text-faint); }
+
+.axis-track, .row-track {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.axis-tick { width: 6px; height: 6px; border-radius: 50%; background: var(--color-border-strong); flex-shrink: 0; }
+
+.study-chip {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  min-width: 110px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.study-chip:hover { background: var(--color-accent-bg-hover); }
+.study-chip.selected { border-color: var(--color-accent); background: var(--color-accent-selected-bg); }
+
+.chip-date { font-size: 0.72rem; font-weight: 600; color: var(--color-accent); }
+.chip-desc {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+/* ── 比較読影セクション ── */
+.compare-section { margin-top: 1.5rem; }
+.compare-section h2 { margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--color-text-heading); }
+
+.compare-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.compare-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+
+.compare-card.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-faint);
+  font-size: 0.8rem;
+}
+
+.compare-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  color: var(--color-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.compare-date { margin: 0 0 0.2rem; font-size: 1rem; font-weight: 600; color: var(--color-text-heading); }
+.compare-desc { margin: 0 0 0.3rem; font-size: 0.85rem; color: var(--color-text); }
+.compare-meta { margin: 0; font-size: 0.76rem; color: var(--color-text-muted); }
+
+/* ── Seriesごとの「画像を表示」ボタン列（SeriesViewerLinks.razor の内部要素） ── */
+::deep .series-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0 0;
+  border-top: 1px dashed var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+::deep .series-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+::deep .series-desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+::deep .series-meta {
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+  font-size: 0.72rem;
+}
+
+/* Viewer(別オリジンのNuxtアプリ)を新しいタブで開くボタン。
+   通常のリンク色（--color-accent）ではなく枠線ボタンにして、
+   「同一アプリ内のページ遷移」ではなく「別アプリを開く操作」であることを視覚的にも区別している。 */
+::deep .viewer-link-button {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  color: var(--color-accent);
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+::deep .viewer-link-button:hover {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+}

@@ -1,0 +1,73 @@
+/* ======================================================
+   theme.css — アプリ全体のカラーテーマ定義
+   ======================================================
+   【CSS変数（カスタムプロパティ）とは】
+   `--色の名前: 値;` という形で書いた変数のこと。
+   他のCSSから `var(--色の名前)` と書くと、その値を「参照」できる。
+
+   例えば下の `--color-accent: #7eb8f7;` を
+   コンポーネント側で `color: var(--color-accent);` と書いて使うと、
+   このファイルの1行を書き換えるだけで、参照している全部の場所の色が
+   一斉に変わる。BEM等の命名ルールを作らなくても
+   「一気に見た目を変える」が実現できるのはこの仕組みのおかげ。
+
+   【:root とは】
+   HTML文書全体の一番外側（ルート要素）を指すセレクタ。
+   ここに変数を定義すると、アプリ内のどのコンポーネントからでも参照できる
+   （scoped styleの中からでも var() 経由なら参照可能）。
+
+   【使い方の基本ルール】
+   - 新しく色を使いたくなったら、まずこのファイルに変数があるか探す
+   - 無ければここに追加してから使う（コンポーネント側に直接 #xxxxxx を書かない）
+   - こうしておくと、将来「ライトテーマを追加したい」となったときも
+     このファイルの値を差し替えるだけで済む
+*/
+
+:root {
+  /* ── 背景色 ── */
+  --color-bg: #0d1117; /* ページ全体の背景（最も暗い） */
+  --color-surface: #111827; /* カード・パネル・ヘッダーの背景 */
+  --color-surface-alt: #1a2133; /* パネル内のホバー・サブ背景 */
+
+  /* ── 境界線 ── */
+  --color-border: #1e2535; /* 標準の境界線・区切り線 */
+  --color-border-strong: #2a3f5f; /* ボタンや選択状態などの強調境界線 */
+
+  /* ── テキスト ── */
+  --color-text: #c8d6e5; /* 標準の本文テキスト */
+  --color-text-heading: #e2e8f0; /* 見出し・強調テキスト */
+  --color-text-muted: #8b9ab3; /* 補足・説明文 */
+  --color-text-faint: #4a5a70; /* さらに薄いテキスト（見出しラベル等） */
+  --color-text-disabled: #566475; /* 無効状態のテキスト */
+
+  /* ── アクセントカラー（操作可能要素・リンク・強調） ── */
+  --color-accent: #7eb8f7;
+  --color-accent-bg: #1e2d45; /* ボタン等の背景 */
+  --color-accent-bg-hover: #243550; /* ボタンホバー時の背景 */
+  --color-accent-selected-bg: #1a3a5c; /* 選択中の行・ナビ項目の背景 */
+  --color-thumbnail-selected-bg: #1e2e44;
+  --color-thumbnail-selected-border: #3b6ea8;
+
+  /* ── 状態色（成功 / 警告 / エラー） ── */
+  --color-success: #4ade80;
+  --color-success-bg: #16281c;
+  --color-success-border: #2a5c3a;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+  --color-danger-bg: #2a1a1a;
+  --color-danger-border: #5c2a2a;
+
+  /* ── その他アクセント（React比較コラム等の紫系） ── */
+  --color-purple: #a78bfa;
+  --color-purple-bg: #1f1a2e;
+  --color-purple-border: #3a2f5f;
+  --color-purple-code-bg: #2a2440;
+  --color-purple-code-text: #d6c9ff;
+
+  /* ── 画像ビューア専用 ── */
+  --color-canvas-bg: #000;
+}
+
+/* 以前はここに .theme-light（検査一覧など事務作業画面向けの明るいテーマ）を定義していたが、
+   指示書2.md要望3「画面全体を暗めに、imageViewerのような見た目に」に対応するため廃止した。
+   画像ビューア・タイムラインと統一感を持たせるため、アプリ全体で :root の暗いテーマのみを使う。 */

@@ -1,0 +1,262 @@
+@*
+    ======================================================
+    Timeline.razor — 患者タイムラインビュー（比較読影支援）
+    ======================================================
+    dicom-tool-2/blazor/DicomTool.Blazor の同名ファイルの移植。実際のPACS製品のタイムライン画面
+    （モダリティごとの行×検査日を横に並べる構成）に近づけている。
+
+    ルートは "/timeline/{patientId}"。dicom-tool-3ではこの画面へは、Worklist(Nuxt3, 3100)から
+    常駐トレイアプリ(TrayApp, 5299)経由でブラウザが開かれてくる想定（docs/CONTRACT.md 1章）。
+    backend/DicomTool.Api の patientTimeline クエリ（StudyService.cs の
+    FetchPatientTimelineAsync）をそのまま使う。検査一覧と同じbackend DBから取得するため、
+    「backendに登録済みの患者」であれば検査一覧・タイムラインの両方から同じデータが見える。
+
+    このページはGraphQLの生DTO（GraphQLStudy）をそのまま扱っている。
+*@
+@page "/timeline/{PatientId}"
+@using DicomTool.Timeline.Models
+@using DicomTool.Timeline.Constants
+@inject StudyService StudyService
+@inject IJSRuntime JS
+
+<div class="page">
+    <header class="page-header">
+        <div class="header-left">
+            @* ======================================================
+               「検査一覧に戻る」は同一SPA内のページ遷移ではなく、別オリジンの独立アプリ
+               (Worklist, http://localhost:3100) への「フルURL遷移」になる。
+               Blazor Router はこのアプリ内のルート（/timeline/{PatientId}等）しか解決できず、
+               別オリジンのURLに対しては素直な <a href> によるブラウザ標準の画面遷移に頼るしかない
+               （これはBlazor特有の制約ではなく、別プロセス・別オリジンで動く独立サービス同士を
+               行き来する場合に共通する制約＝いわゆるマイクロフロントエンドの感覚そのもの）。
+               ====================================================== *@
+            <a class="back-link" href="@ExternalServiceUrls.WorklistBaseUrl">← 検査一覧に戻る</a>
+            <h1>タイムライン</h1>
+            <p class="patient-line">
+                患者ID
+                <code>@PatientId</code>
+                @if (_studies.Count > 0)
+                {
+                    <span>　@(_studies[0].PatientName)　@(FormatDate(_studies[0].StudyDate))時点</span>
+                }
+            </p>
+        </div>
+    </header>
+
+    <main class="page-main">
+        @if (_loading)
+        {
+            <p class="status-line">読み込み中…</p>
+        }
+        else if (_errorMessage is not null)
+        {
+            <p class="status-line error">@_errorMessage</p>
+        }
+        else if (_studies.Count == 0)
+        {
+            <div class="empty-state">
+                <p>この患者IDの検査はbackendにまだ登録されていません。</p>
+                <p class="hint">Worklist (<a href="@ExternalServiceUrls.WorklistBaseUrl">@ExternalServiceUrls.WorklistBaseUrl</a>) からDICOMファイルをアップロードすると、ここにタイムラインとして表示されます。</p>
+            </div>
+        }
+        else
+        {
+            <div class="timeline-grid">
+                @* 日付軸（実製品の上部にある目盛りバーを簡易的に再現） *@
+                <div class="axis-row">
+                    <div class="row-label"></div>
+                    <div class="axis-track">
+                        @foreach (var date in SortedDates())
+                        {
+                            <span class="axis-tick" @key="date"></span>
+                        }
+                    </div>
+                </div>
+
+                @* モダリティごとの行。各行の中に、そのモダリティの検査が古い順に並ぶ *@
+                @foreach (var group in ModalityGroups())
+                {
+                    <div class="modality-row" @key="group.Modality">
+                        <div class="row-label">
+                            <span class="row-modality">@group.Modality</span>
+                            <span class="row-count">@(group.Studies.Count)件</span>
+                        </div>
+                        <div class="row-track">
+                            @foreach (var study in group.Studies)
+                            {
+                                <button type="button" class="study-chip @(study.StudyInstanceUid == _selectedStudyUid ? "selected" : "")"
+                                        @key="study.StudyInstanceUid"
+                                        @onclick="() => _selectedStudyUid = study.StudyInstanceUid">
+                                    <span class="chip-date">@FormatDate(study.StudyDate)</span>
+                                    <span class="chip-desc">@(string.IsNullOrEmpty(study.StudyDescription) ? "説明なし" : study.StudyDescription)</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @* 選択中の検査の詳細（比較読影のために2件並べて見比べられるようにする） *@
+            @* ここはすでに親の else{} ブロックの中（＝Cのコード文脈）なので、
+               markup→code切り替え用の @{ } や @if は不要（というよりエラーになる）。
+               「コード文脈の中に直接C#文を書く」だけでよい。 *@
+            var selected = SelectedStudy();
+            if (selected is not null)
+            {
+                var prior = PriorStudy();
+                <section class="compare-section">
+                    <h2>比較読影</h2>
+                    <div class="compare-columns">
+                        <div class="compare-card">
+                            <p class="compare-label">選択中</p>
+                            <p class="compare-date">@FormatDate(selected.StudyDate)</p>
+                            <p class="compare-desc">@(string.IsNullOrEmpty(selected.StudyDescription) ? "説明なし" : selected.StudyDescription)</p>
+                            <p class="compare-meta">@selected.Modality / @(selected.Series.Count) シリーズ</p>
+                            <SeriesViewerLinks Series="selected.Series" OnOpenViewer="OpenViewerAsync" />
+                        </div>
+                        @if (prior is not null)
+                        {
+                            <div class="compare-card">
+                                <p class="compare-label">直前の検査</p>
+                                <p class="compare-date">@FormatDate(prior.StudyDate)</p>
+                                <p class="compare-desc">@(string.IsNullOrEmpty(prior.StudyDescription) ? "説明なし" : prior.StudyDescription)</p>
+                                <p class="compare-meta">@prior.Modality / @(prior.Series.Count) シリーズ</p>
+                                <SeriesViewerLinks Series="prior.Series" OnOpenViewer="OpenViewerAsync" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="compare-card empty">
+                                <p class="compare-label">比較対象となる過去検査はありません</p>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        }
+    </main>
+</div>
+
+@code {
+    [Parameter] public string PatientId { get; set; } = "";
+
+    private List<GraphQLStudy> _studies = new();
+    private bool _loading;
+    private string? _errorMessage;
+    private string? _selectedStudyUid;
+    private string? _loadedPatientId;
+
+    // OnParametersSetAsyncのみを使う（初回表示・患者ID変更の両方をここ1箇所でカバーできる）。
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedPatientId == PatientId) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+        StateHasChanged();
+        try
+        {
+            _studies = await StudyService.FetchPatientTimelineAsync(PatientId);
+            _loadedPatientId = PatientId;
+            // 実製品も開いた直後は最新検査が選択された状態になる（studiesは新しい順で返る）。
+            _selectedStudyUid = _studies.FirstOrDefault()?.StudyInstanceUid;
+        }
+        catch (Exception e)
+        {
+            _errorMessage = e.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // backendの検査日は "YYYYMMDD" ではなく ISO形式の日付文字列（DateOnlyのJSONシリアライズ結果）
+    // で返ってくる。DateTime.TryParseで解釈できなければ、そのまま生の文字列を表示する。
+    private static string FormatDate(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "—";
+        if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var date))
+        {
+            return $"{date.Year}/{date.Month:D2}/{date.Day:D2}";
+        }
+        return raw;
+    }
+
+    // Vue版のcomputedに相当するものが無いため、描画のたびに素直に計算し直す
+    // （他のページ・コンポーネントと同じ、このプロジェクト共通の書き方）。
+    // モダリティごとに行を分け、各行の中では検査日の古い順（左→右）に並べる
+    // （実製品のタイムラインは左が過去・右が現在という時系列の流れになっているため）。
+    private List<(string Modality, List<GraphQLStudy> Studies)> ModalityGroups()
+    {
+        var byModality = new Dictionary<string, List<GraphQLStudy>>();
+        foreach (var study in _studies)
+        {
+            var key = string.IsNullOrEmpty(study.Modality) ? "不明" : study.Modality;
+            if (!byModality.TryGetValue(key, out var list))
+            {
+                list = new List<GraphQLStudy>();
+                byModality[key] = list;
+            }
+            list.Add(study);
+        }
+
+        return byModality
+            .Select(kv => (Modality: kv.Key, Studies: kv.Value.OrderBy(s => s.StudyDate, StringComparer.Ordinal).ToList()))
+            .OrderBy(g => g.Modality, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private List<string> SortedDates() =>
+        _studies.Select(s => s.StudyDate).Distinct().OrderBy(d => d, StringComparer.Ordinal).ToList();
+
+    private GraphQLStudy? SelectedStudy() =>
+        _studies.FirstOrDefault(s => s.StudyInstanceUid == _selectedStudyUid);
+
+    // 「直前の検査」＝選択中の検査より前の日付の中で最も新しいもの（比較読影の対象）。
+    private GraphQLStudy? PriorStudy()
+    {
+        var selected = SelectedStudy();
+        if (selected is null) return null;
+        return _studies
+            .Where(s => string.CompareOrdinal(s.StudyDate, selected.StudyDate) < 0)
+            .OrderByDescending(s => s.StudyDate, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
+
+    // ======================================================
+    // Viewerへの導線（新規機能）
+    // ======================================================
+    // 検査カード内の各Seriesの「画像を表示」ボタン列は Pages/SeriesViewerLinks.razor という
+    // 小さな子コンポーネントに切り出している（選択中カード・直前検査カードの2箇所から
+    // 同じ見た目を再利用するため。単純なforeachの重複よりコンポーネント分割の方が
+    // Blazorらしい書き方であり、OnOpenViewerのEventCallbackも素直に親メソッドへ渡せる）。
+
+    // ======================================================
+    // 【なぜViewerは別タブで開く設計にしたか】
+    // ======================================================
+    // dicom-tool-3ではViewerは独立したNuxt3アプリ(http://localhost:3200)として別プロセスで動く
+    // （TimelineのBlazor WASMアプリとはビルド成果物もオリジンも別）。
+    // NavigationManager.NavigateTo は同一SPA内のクライアントサイドルーティングを前提にしており、
+    // 別オリジンのURLを渡した場合は結局ブラウザの標準ナビゲーションにフォールバックするだけで、
+    // 「別タブで開く」という挙動そのものはJavaScriptのwindow.open()でしか実現できない。
+    // そのため、あえてIJSRuntime経由でwindow.open(url, "_blank")を呼ぶ。
+    //
+    // 別タブにする理由は実務上の使い勝手にもある：読影医はTimelineで検査の文脈
+    // （どの日付の、どのモダリティの検査を比較しているか）を保持したまま、Viewerで
+    // 画像だけを別ウィンドウに出して見比べたい。同一タブでフルURL遷移してしまうと、
+    // Viewerから戻る際にTimelineの選択状態（_selectedStudyUid等、SPA内のみのメモリ状態）が
+    // 失われ、再度 /timeline/{PatientId} を読み込み直すことになってしまう。
+    // 「別々の独立Webアプリ間を、フルURL遷移で行き来する」というマイクロフロントエンド的な
+    // 感覚そのものを学ぶポイントでもある。
+    private async Task OpenViewerAsync(string seriesInstanceUid)
+    {
+        var url = ExternalServiceUrls.ViewerSeriesUrl(seriesInstanceUid);
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+}

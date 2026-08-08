@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <!--
+    ======================================================
+    DicomTool.Worker ― Temporalワークフローを実際に実行するプロセス
+    ======================================================
+    docs/CONTRACT.md 1章の通り、このプロジェクトは「待受ポートを持たない」サービスである。
+    HTTPサーバーではなく、Temporal Server(localhost:7233)に**自分から接続しに行き**、
+    Task Queue "dicom-tool-task-queue" (TemporalConstants.TaskQueue) を継続的にポーリングして
+    ワークフロー/アクティビティのタスクを受け取る、という逆方向の通信モデルを取る。
+
+    そのため素のコンソールアプリでもよいが、公式サンプル(temporalio/samples-dotnet の
+    DependencyInjection/AspNet サンプル)にならい、長時間稼働プロセス向けの
+    "Microsoft.NET.Sdk.Worker" テンプレート（Generic Host: Microsoft.Extensions.Hosting）を使う。
+    これにより appsettings.json / DI コンテナ / ロギング / Graceful Shutdown(Ctrl+C)を
+    ASP.NET Core と同じ作法でそのまま使える。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-DicomTool.Worker-de9bd29f-1bbb-4ca2-8c17-b6579fb0cb25</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+
+    <!--
+      Temporalio ― Temporal .NET SDK 本体（Workflow/Activity属性、TemporalClient等）。
+      Temporalio.Extensions.Hosting ― Generic Host(IHostBuilder)にTemporal Workerを
+      IHostedServiceとして統合するための拡張パッケージ。
+      AddHostedTemporalWorker/AddScopedActivities/AddWorkflow等の拡張メソッドはここに入っている
+      (Program.cs参照)。バージョンはCONTRACT.md執筆時点(2026年7月)の最新安定版1.17.0に固定。
+      NuGet: https://www.nuget.org/packages/Temporalio / 公式サンプル: github.com/temporalio/samples-dotnet
+    -->
+    <PackageReference Include="Temporalio" Version="1.17.0" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.17.0" />
+
+    <!-- fo-dicom ― SaveToStorageActivity内でDICOMファイルのタグ解析(Study/Series/SOP UID等)に使う。
+         旧実装(dicom-tool/backend/DicomLearning.GraphQL)と同じ5.2.6系に揃える。 -->
+    <PackageReference Include="fo-dicom" Version="5.2.6" />
+
+    <!--
+      DicomDbContextはshared/DicomTool.Shared側で定義されているが、UseNpgsql(...)の呼び出しと
+      DIコンテナへのAddDbContext登録はホスト側であるこのProgram.csが担う責務のため、
+      プロバイダ本体とdotnet efツール連携用のDesignパッケージをこちらにも明示的に追加する
+      （Sharedのpackage referenceはPrivateAssets=allのものがあり、そのままでは
+      参照元プロジェクトに伝播しない設定のため、ここで明示する）。
+      Sharedプロジェクトと同じバージョンに揃えて依存関係の衝突を避ける。
+    -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      shared/DicomTool.Shared ― DicomDbContext・Entities(UserStudy/UserSeries/UserSop)・
+      Constants(TemporalConstants/StoragePaths)・Contracts(Upload/DeleteDicomWorkflowInput)を
+      backend/DicomTool.Api と共有するためのプロジェクト参照(docs/CONTRACT.md 7章)。
+    -->
+    <ProjectReference Include="..\..\shared\DicomTool.Shared\DicomTool.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

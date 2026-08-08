@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      DicomTool.Shared … Entities/DbContext/Constants/Contractsの共有基盤（docs/CONTRACT.md 7章）。
+      services/DicomTool.Worker も同じプロジェクトを参照しており、
+      「2つの別プロセスが同じテーブル定義・同じワークフロー入力DTOを別々に書いてズレる」事故を防ぐ。
+    -->
+    <ProjectReference Include="..\..\shared\DicomTool.Shared\DicomTool.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GraphQLサーバー本体（HotChocolate）。[Authorize]属性の解釈にAuthorizationパッケージが別途必要。 -->
+    <PackageReference Include="HotChocolate.AspNetCore" Version="16.4.0" />
+    <PackageReference Include="HotChocolate.AspNetCore.Authorization" Version="16.4.0" />
+
+    <!-- JWTをhttpOnly Cookie経由で検証するための認証ミドルウェア。 -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+
+    <!-- EF CoreのPostgreSQLプロバイダ。DicomDbContext自体はプロバイダ非依存だが、
+         UseNpgsql(...)を呼ぶ側（このプロジェクト）がプロバイダ実装を参照する必要がある。 -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSql" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!--
+      fo-dicom … アップロード時のタグ解析はもう行わない（Worker側のActivityの責務、
+      docs/CONTRACT.md 2章）が、「DICOMタグへの復元」機能（Mutation.RevertXxxFieldsAsync /
+      Services/DicomTagRevertService.cs）は確定済みストレージのファイルを読み直すために
+      引き続き必要。
+    -->
+    <PackageReference Include="fo-dicom" Version="5.2.6" />
+
+    <!--
+      Temporalio … Temporal .NET SDK。ワークフローを起動する側（このApi）は
+      ITemporalClient経由の「型なしクライアントAPI」だけを使い、Workflow実装クラスは
+      参照しない（docs/CONTRACT.md 4章、疎結合設計）。
+    -->
+    <PackageReference Include="Temporalio" Version="1.17.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,84 @@
+# ======================================================
+# dicom-tool-3 のローカルインフラ（PostgreSQL + Temporal）
+# ======================================================
+# このファイルだけで「アプリのDB」と「Temporal(ワークフローエンジン)」を両方立ち上げる。
+# 各C#サービス(Api/Worker/DicomScp)自体はこのcompose管理下には置かず、
+# `dotnet run` で個別に起動する（学習用に、各プロセスの起動ログを個別ターミナルで
+# 見比べやすくするため。VS Codeのマルチターミナル運用を想定）。
+#
+# 起動: docker compose up -d
+# 停止: docker compose down          （データは postgres-data ボリュームに残る）
+# 完全初期化: docker compose down -v （ボリュームごと削除。DB/Temporalの状態が全部消える）
+
+services:
+  # ------------------------------------------------------
+  # PostgreSQL: アプリ用DB(dicomtool)とTemporal用DB(temporal / temporal_visibility)を
+  # 1つのPostgreSQLインスタンスに同居させる（学習用の簡略構成。実務ではDBサーバー自体を
+  # 分けることが多いが、無料・軽量を優先しここでは1インスタンスにまとめる）。
+  # ------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: dicomtool-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dicomtool
+      POSTGRES_PASSWORD: dicomtool_dev_password
+      POSTGRES_DB: dicomtool
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # postgresイメージは /docker-entrypoint-initdb.d/ 配下の .sql を「初回起動時のみ」
+      # 自動実行する（2回目以降の起動では無視される）。ここでTemporal用の2DBを追加作成する。
+      - ./infra/postgres/init-temporal-dbs.sql:/docker-entrypoint-initdb.d/init-temporal-dbs.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dicomtool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------
+  # Temporal Server本体。
+  # `auto-setup` イメージは「起動時にDBスキーマが無ければ自動でマイグレーションする」
+  # 特別版で、学習・開発用途で最も手軽（本番運用では手動でスキーマ管理するのが定石）。
+  # ------------------------------------------------------
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: dicomtool-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: dicomtool
+      POSTGRES_PWD: dicomtool_dev_password
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      # 「可視性(Visibility)ストア」= Temporal Web UIの検索・一覧機能が使うインデックス。
+      # 本番はElasticsearch推奨だが、学習規模ではSQL(Postgres)のままで十分＆無料。
+      # DYNAMIC_CONFIG_FILE_PATHはauto-setupイメージのバージョンによって同梱パスが異なり、
+      # 存在しないパスを指定するとコンテナが起動ループするため、あえて指定せずイメージ既定値に任せる。
+    ports:
+      - "7233:7233" # gRPC frontend。C# SDK(DicomTool.Worker等)はここに接続する。
+
+  # ------------------------------------------------------
+  # Temporal Web UI（ワークフロー実行履歴をブラウザで見るための管理画面）。
+  # http://localhost:8233 でアクセス。
+  # ------------------------------------------------------
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    container_name: dicomtool-temporal-ui
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    ports:
+      - "8233:8080"
+
+volumes:
+  postgres-data:

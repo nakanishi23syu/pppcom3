@@ -1,0 +1,9 @@
+.not-found {
+  max-width: 480px;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+.not-found h1 { font-size: 1.2rem; color: var(--color-text-heading); margin: 0 0 0.5rem; }
+.not-found p { color: var(--color-text-muted); font-size: 0.85rem; }
+.not-found a { color: var(--color-accent); }

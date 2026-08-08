@@ -1,0 +1,287 @@
+using System.Text;
+using DicomTool.Shared.Constants;
+using DicomTool.Shared.Contracts;
+using FellowOakDicom;
+using FellowOakDicom.Network;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
+
+namespace DicomTool.DicomScp.Services;
+
+// ==========================================================================================
+// DicomScpService ― DICOM SCP(Service Class Provider＝受信側/サーバー)本体
+// ==========================================================================================
+//
+// 【SCU/SCPという用語について】
+// DICOMの世界では通信の役割を「クライアント/サーバー」ではなく「SCU(Service Class User)」と
+// 「SCP(Service Class Provider)」と呼ぶ。C-STOREというサービスクラスにおいては、
+// 画像を送る側(送信元モダリティ等)が「C-STORE SCU」、画像を受け取る側(PACS等)が「C-STORE SCP」となる。
+// このクラスは「C-ECHO SCP」でもあり「C-STORE SCP」でもある(=両方のサービスクラスの受信側を兼ねる)。
+//
+// 【全体の流れ】
+// 1台の外部モダリティ(またはこのリポジトリ自身のSCU自己疎通テスト)がTCP接続してくるたびに、
+// fo-dicomの DicomServer が「1コネクション = 1インスタンス」の原則でこのクラスの
+// 新しいインスタンスを生成する（つまりこのクラスはコネクションごとの状態＝アソシエーションの
+// 状況を安全にフィールドへ持ってよい）。
+//
+// このクラスが実装している4つの型の役割:
+//   ・DicomService(基底クラス) … DICOM Upper Layer Protocolの生バイト列の送受信、
+//                                 PDU(Protocol Data Unit)の組み立て/解析など「配管」部分をやってくれる。
+//   ・IDicomServiceProvider    … アソシエーション確立/解放/切断など、接続そのもののライフサイクルを扱う。
+//   ・IDicomCEchoProvider      … C-ECHO(疎通確認)サービスクラスの受信側としての振る舞いを定義する。
+//   ・IDicomCStoreProvider     … C-STORE(画像保存)サービスクラスの受信側としての振る舞いを定義する。
+public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoProvider, IDicomCStoreProvider
+{
+    // このSCPが受け入れる転送構文(Transfer Syntax)の一覧。
+    // 転送構文とは「DICOMデータセットをバイト列としてどう符号化するか」の取り決めで、
+    // 代表的には次の3つ:
+    //   ・Implicit VR Little Endian … タグの型(VR: Value Representation)を明示せず、
+    //                                   規格書の定義から暗黙に決める。最も古くから存在し、
+    //                                   すべてのDICOM機器が最低限サポートを義務付けられている
+    //                                   「デフォルト転送構文」。
+    //   ・Explicit VR Little Endian … タグごとにVRを明示的にバイト列へ含める。曖昧さがなく現代的。
+    //   ・Explicit VR Big Endian    … 上記のバイトオーダーをビッグエンディアンにしたもの
+    //                                   (規格上は非推奨扱いだが後方互換のため残っている)。
+    // 実務のPACSはこれに加えてJPEG等の圧縮転送構文も並べるが、本プロジェクトは学習用に
+    // 「非圧縮のみ」に絞ってシンプルさを優先している。
+    private static readonly DicomTransferSyntax[] AcceptedTransferSyntaxes =
+    [
+        DicomTransferSyntax.ExplicitVRLittleEndian,
+        DicomTransferSyntax.ExplicitVRBigEndian,
+        DicomTransferSyntax.ImplicitVRLittleEndian,
+    ];
+
+    private readonly ILogger<DicomScpService> _appLogger;
+    private readonly ITemporalWorkflowStarter _workflowStarter;
+    private readonly IHostEnvironment _hostEnvironment;
+
+    // ------------------------------------------------------------------------------------
+    // コンストラクタ
+    // ------------------------------------------------------------------------------------
+    // fo-dicomのDI統合(Services/DicomScpHostedService.cs で AddFellowOakDicom() 経由で登録)は、
+    // 「stream / fallbackEncoding / log / dependencies」というDicomServer側が用意する4引数に加えて、
+    // ASP.NET CoreのDIコンテナに登録済みの任意のサービス(ここではILogger<T>・Temporal起動役・
+    // IHostEnvironment)をコンストラクタインジェクションできる。
+    // これにより「1接続ごとに新しいインスタンスが作られる」DICOM側の設計と、
+    // 「アプリ全体で共有したいサービス(Temporalクライアント等)」を無理なく両立できる。
+    public DicomScpService(
+        INetworkStream stream,
+        Encoding fallbackEncoding,
+        ILogger log,
+        DicomServiceDependencies dependencies,
+        ILogger<DicomScpService> appLogger,
+        ITemporalWorkflowStarter workflowStarter,
+        IHostEnvironment hostEnvironment)
+        : base(stream, fallbackEncoding, log, dependencies)
+    {
+        _appLogger = appLogger;
+        _workflowStarter = workflowStarter;
+        _hostEnvironment = hostEnvironment;
+    }
+
+    // ======================================================================================
+    // アソシエーション確立: A-ASSOCIATE-RQ を受け取ったときに呼ばれる
+    // ======================================================================================
+    // 「アソシエーション」とは、DICOMにおけるTCPコネクション上に張られる論理的なセッションのこと。
+    // 生のTCP接続が確立しただけではDICOM的にはまだ何もできず、SCU側が最初に送ってくる
+    // A-ASSOCIATE-RQ(アソシエーション確立要求)の中身をSCP側が検証し、
+    // A-ASSOCIATE-AC(受諾)かA-ASSOCIATE-RJ(拒否)のどちらかを返して初めて、
+    // C-ECHOやC-STOREなどの実際のサービスをやり取りできるようになる。
+    //
+    // A-ASSOCIATE-RQには主に次の情報が入っている:
+    //   ・Calling AE Title … 接続してきた側(SCU)が名乗るAEタイトル。
+    //   ・Called AE Title  … 接続先として指定されたAEタイトル(＝このSCPが「自分宛てか」を判定する材料)。
+    //   ・Presentation Context(プレゼンテーションコンテキスト)の一覧
+    //       … 「どのSOP Class(例: C-ECHOやCTイメージ保存)を」「どの転送構文の候補で」やり取りしたいか、
+    //         という提案のリスト。1つのアソシエーションの中で複数のSOP Classを同時に提案できる。
+    public Task OnReceiveAssociationRequestAsync(DicomAssociation association)
+    {
+        _appLogger.LogInformation(
+            "アソシエーション要求を受信しました。CallingAE={CallingAE}, CalledAE={CalledAE}, RemoteHost={RemoteHost}",
+            association.CallingAE, association.CalledAE, association.RemoteHost);
+
+        foreach (var pc in association.PresentationContexts)
+        {
+            _appLogger.LogInformation(
+                "  PresentationContext: AbstractSyntax(SOP Class)={AbstractSyntax}, 提案された転送構文=[{TransferSyntaxes}]",
+                pc.AbstractSyntax,
+                string.Join(", ", pc.GetTransferSyntaxes()));
+        }
+
+        // --------------------------------------------------------------------------------
+        // 【学習ポイント】AEタイトルが接続可否を左右する
+        // --------------------------------------------------------------------------------
+        // DICOMはIPアドレス/ポートに加えて「Called AE Title」という文字列も一致させないと
+        // 接続を受け付けない、という仕組みを持つ(実務でも「相手のAEタイトルを1文字間違えて
+        // 接続できない」というトラブルは非常によくある)。
+        // ここではあえて「DicomNetworkConstants.OwnAeTitle と一致しないCalled AEは拒否する」
+        // 実装を入れて、この仕組みをコード上で体験できるようにしている
+        // (fo-dicom自体はデフォルトでは何もチェックせず全AEタイトルを受け入れるため、
+        //  このチェックは呼び出し側=このメソッドで明示的に行う必要がある)。
+        if (association.CalledAE != DicomNetworkConstants.OwnAeTitle)
+        {
+            _appLogger.LogWarning(
+                "Called AE Title が自システムのAEタイトル({OwnAeTitle})と一致しないため、アソシエーションを拒否します。要求されたCalledAE={CalledAE}",
+                DicomNetworkConstants.OwnAeTitle, association.CalledAE);
+
+            // A-ASSOCIATE-RJ(拒否)を返す。
+            //   Result   : Permanent = リトライしても無駄な恒久的拒否(一時的な混雑等ではない)であることを示す。
+            //   Source   : ServiceUser = 拒否の原因はアプリケーション層(＝AEタイトル不一致というこちらの都合)側にあることを示す。
+            //   Reason   : CalledAENotRecognized = 「あなたが指定したCalled AE Titleにはお心当たりがありません」という理由コード。
+            return SendAssociationRejectAsync(
+                DicomRejectResult.Permanent,
+                DicomRejectSource.ServiceUser,
+                DicomRejectReason.CalledAENotRecognized);
+        }
+
+        // --------------------------------------------------------------------------------
+        // プレゼンテーションコンテキストごとに転送構文をネゴシエーションする。
+        // --------------------------------------------------------------------------------
+        // AcceptTransferSyntaxes(...) は「SCU側が提案してきた転送構文の候補」と
+        // 「このSCPがAcceptedTransferSyntaxesとして対応できる転送構文」の積集合を取り、
+        // 最初に一致したものをそのプレゼンテーションコンテキストの「確定転送構文」として採用する
+        // (どのSOP Classについても、この後のデータはこの確定した転送構文でエンコードされる)。
+        // 共通の転送構文が1つも無ければ、そのプレゼンテーションコンテキストは自動的に
+        // 「RejectTransferSyntaxesNotSupported」として個別に拒否扱いになる
+        // (アソシエーション全体は拒否されず、そのSOP Classだけ使えない、という粒度で失敗できるのがミソ)。
+        foreach (var pc in association.PresentationContexts)
+        {
+            pc.AcceptTransferSyntaxes(AcceptedTransferSyntaxes);
+        }
+
+        // A-ASSOCIATE-AC(受諾)を返す。ここでようやくC-ECHO/C-STORE等の実サービスが開始できる。
+        return SendAssociationAcceptAsync(association);
+    }
+
+    // ======================================================================================
+    // アソシエーション解放: A-RELEASE-RQ を受け取ったときに呼ばれる
+    // ======================================================================================
+    // SCU側が「もうこのアソシエーションで送るものは無い」と判断すると、TCP接続を素のまま
+    // 切るのではなく、A-RELEASE-RQ/RPというお行儀の良い手順(ハンドシェイク)でセッションを
+    // 正式に終了させる。ここでは何も特別なことはせず、解放応答を返すだけでよい。
+    public Task OnReceiveAssociationReleaseRequestAsync()
+    {
+        _appLogger.LogInformation("アソシエーション解放要求(A-RELEASE-RQ)を受信しました。解放応答(A-RELEASE-RP)を返します。");
+        return SendAssociationReleaseResponseAsync();
+    }
+
+    // 通信相手が A-ABORT (異常終了)を送ってきた場合、またはこちらから中断すべきと判断した場合に呼ばれる。
+    // ネットワーク断・相手側のクラッシュ等、正常なA-RELEASEを経ない終了パターン。
+    public void OnReceiveAbort(DicomAbortSource source, DicomAbortReason reason)
+    {
+        _appLogger.LogWarning("アソシエーションがAbortされました。Source={Source}, Reason={Reason}", source, reason);
+    }
+
+    // TCPコネクションそのものが閉じたときに呼ばれる(正常なA-RELEASE後もAbort後も、最終的にここへ来る)。
+    public void OnConnectionClosed(Exception? exception)
+    {
+        if (exception is null)
+        {
+            _appLogger.LogInformation("コネクションが正常に閉じられました。");
+        }
+        else
+        {
+            _appLogger.LogWarning(exception, "コネクションが異常終了しました。");
+        }
+    }
+
+    // ======================================================================================
+    // C-ECHO ― いわゆる「DICOM Ping」
+    // ======================================================================================
+    // C-ECHOは、DICOM規格上「Verification SOP Class」というサービスクラスに属する。
+    // このサービスの目的はただ1つ、「アソシエーションが正しく確立でき、相手が生きていて、
+    // ちゃんとDIMSE応答を返せるか」を確認することだけであり、画像データや患者情報など
+    // 一切の実データをやり取りしない(だから「Ping」と呼ばれる)。
+    // PACS同士の疎通確認、モダリティの導通試験など、実務でも真っ先に叩かれる基本コマンド。
+    // ここでは要求を受けたら即座に DicomStatus.Success を返すだけでよい
+    // (Success以外を返す状況は通常想定しない＝「相手が生きているか」の確認なので、
+    //  応答を返せている時点でほぼ必ずSuccessになる)。
+    public Task<DicomCEchoResponse> OnCEchoRequestAsync(DicomCEchoRequest request)
+    {
+        _appLogger.LogInformation("C-ECHO要求を受信しました。応答としてDicomStatus.Successを返します。");
+        return Task.FromResult(new DicomCEchoResponse(request, DicomStatus.Success));
+    }
+
+    // ======================================================================================
+    // C-STORE ― 画像(データセット)本体の送信サービス
+    // ======================================================================================
+    // C-STOREはVerification(C-ECHO)と違い、実際のDICOMデータセット(患者情報・検査情報・
+    // 画素データ等をすべて含むファイル1つ分)を丸ごと送りつけてくるサービスクラス。
+    // request.File には、送られてきたデータセット全体が fo-dicom の DicomFile として
+    // 既にパース済みの状態で渡ってくる(PDUの分割受信・再構成はfo-dicomが面倒を見てくれている)。
+    public async Task<DicomCStoreResponse> OnCStoreRequestAsync(DicomCStoreRequest request)
+    {
+        // --------------------------------------------------------------------------------
+        // 【学習ポイント】なぜここでDBに保存せず、ステージングして「起動だけ」するのか
+        // --------------------------------------------------------------------------------
+        // DICOM(DIMSE)の作法として、C-STORE要求を受けたSCPは「その処理結果(成功/失敗)」を
+        // 同じアソシエーションの中でC-STORE応答(C-STORE-RSP)として速やかに返す必要がある。
+        // これは「相手(SCU)はこの応答を待って次の画像を送り続ける/中止するかを判断する」
+        // 同期的なプロトコルだからであり、応答が遅いと大量の画像を送るモダリティ側の
+        // スループットが著しく落ちる(最悪タイムアウトでアソシエーションごと切断される)。
+        //
+        // 一方で、docs/CONTRACT.md 2章にある「正式ストレージへの配置(タグ解析してStudy/Series/SOP
+        // ディレクトリへ移動)」や「PostgreSQLへのレコード登録」は、ディスクI/OやDB接続を伴う
+        // 時間のかかる処理であり、かつそれぞれが独立して失敗しうる(ディスクフル、DB接続断等)。
+        // これをC-STORE応答を返す前にこの場で同期的にやってしまうと、
+        //   ・処理が遅い分だけSCU側の送信がブロックされる
+        //   ・DB登録が失敗した場合にDICOM層としてどう応答すべきか設計が難しくなる
+        //     (「ファイルは受信できたがDB登録は失敗した」という中途半端な状態をDICOMの
+        //      ステータスコード1つでは表現しづらい)
+        // という問題が起きる。
+        //
+        // そこでこのSCPは「受信したファイルをステージング領域にそのまま書き込む」ところまでだけを
+        // 自分の責務とし、それが終わった時点で即座にC-STORE応答(Success)を返す。
+        // 「タグ解析して正式パスへ配置する」「DBへ登録する」という重い処理は、Temporalワークフロー
+        // (UploadDicomWorkflow、実装本体はservices/DicomTool.Worker)へ"起動を依頼するだけ"にして、
+        // 実行そのものはアソシエーションの外(非同期)で行う。
+        // これにより「DICOM層の応答速度」と「後続処理の信頼性(リトライ等)」をそれぞれ
+        // 別の仕組み(DIMSEの応答 / Temporalのワークフロー実行)に分担させている。
+        var incomingDir = StoragePaths.ResolveIncomingPath(_hostEnvironment.ContentRootPath);
+        Directory.CreateDirectory(incomingDir);
+
+        // SOPInstanceUID(Service-Object Pair Instance UID)は、DICOMデータセット1つ(=1枚の画像や
+        // 1系列の非画像オブジェクト)を全世界で一意に識別するID。ファイル名として使うのに最適。
+        var sopInstanceUid = request.SOPInstanceUID.UID;
+        var stagingFileName = $"{sopInstanceUid}.dcm";
+        var stagingFilePath = Path.Combine(incomingDir, stagingFileName);
+
+        _appLogger.LogInformation(
+            "C-STORE要求を受信しました。SOPInstanceUID={SopInstanceUid}, SOPClassUID={SopClassUid}, 保存先={StagingFilePath}",
+            sopInstanceUid, request.SOPClassUID, stagingFilePath);
+
+        await request.File.SaveAsync(stagingFilePath).ConfigureAwait(false);
+
+        // Temporalへワークフロー起動を"依頼"する。ここで待つのは「起動リクエストがTemporal Serverに
+        // 受理されたこと」までであり、UploadDicomWorkflow自体の実行完了(ストレージ確定・DB登録)は待たない。
+        var input = new UploadDicomWorkflowInput(
+            StagingFileName: stagingFileName,
+            OriginalFileName: stagingFileName,
+            SourceProtocol: "DICOM_CSTORE");
+
+        try
+        {
+            await _workflowStarter.StartUploadDicomWorkflowAsync(input).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Temporal Serverが未起動、あるいはWorkerがまだ実装されていない、といった状況でも
+            // 「ファイル自体は受信できている(ステージング領域には確かに書き込まれている)」ため、
+            // ここでは例外を握りつぶしてログに残すだけにし、C-STORE応答はSuccessのまま返す。
+            // (fo-dicom/DICOM層からすると「受信」は成功しているので、これは妥当な判断)
+            _appLogger.LogError(
+                ex,
+                "UploadDicomWorkflowの起動に失敗しました。ファイル自体はステージング領域への保存に成功しています。StagingFileName={StagingFileName}",
+                stagingFileName);
+        }
+
+        return new DicomCStoreResponse(request, DicomStatus.Success);
+    }
+
+    // C-STORE処理中(主にrequest.File保存待ちの間)に例外が起きた場合にfo-dicom内部から呼ばれる
+    // (例: 受信途中でストリームが切れた、一時ファイルの書き込みに失敗した等)。
+    public Task OnCStoreRequestExceptionAsync(string tempFileName, Exception e)
+    {
+        _appLogger.LogError(e, "C-STORE要求の処理中に例外が発生しました。一時ファイル={TempFileName}", tempFileName);
+        return Task.CompletedTask;
+    }
+}

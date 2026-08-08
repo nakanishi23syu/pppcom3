@@ -1,0 +1,45 @@
+@*
+    ======================================================
+    Home.razor — ルート("/")の簡易案内ページ
+    ======================================================
+    移植元(dicom-tool-2)の "/" は検査一覧(StudyList.razor)そのものだったが、
+    dicom-tool-3では検査一覧はWorklist(Nuxt3, 別サービス)の役割になったため、
+    このTimelineサービス単体の "/" は「タイムライン画面の入り口を示す簡易ページ」に留めている
+    （本番導線は Worklist → 常駐トレイアプリ → ブラウザで /timeline/{patientId} を開く、
+    というdocs/CONTRACT.md記載の流れになるが、Worklist/TrayAppが未起動でもこのTimelineアプリ
+    単体の動作確認ができるよう、患者IDを直接入力してジャンプできるフォームを用意している）。
+*@
+@page "/"
+@inject NavigationManager Nav
+
+<div class="home-page">
+    <h1>DICOM学習ツール — Timeline</h1>
+    <p class="lead">
+        患者IDを指定したタイムライン画面 (<code>/timeline/&#123;patientId&#125;</code>) を提供する、
+        dicom-tool-3の独立フロントエンドサービスです（ポート5230）。
+    </p>
+
+    <form class="jump-form" @onsubmit="GoToTimeline">
+        <label for="patientId">患者IDでタイムラインを開く</label>
+        <div class="jump-row">
+            <input id="patientId" @bind="_patientId" @bind:event="oninput" placeholder="例: patient-001" />
+            <button type="submit" disabled="@string.IsNullOrWhiteSpace(_patientId)">開く</button>
+        </div>
+    </form>
+
+    <p class="hint">
+        通常はWorklist (<a href="@ExternalUrl">@ExternalUrl</a>) の検査一覧から、
+        常駐トレイアプリ経由でこの画面が開かれます。
+    </p>
+</div>
+
+@code {
+    private string _patientId = "";
+    private const string ExternalUrl = "http://localhost:3100";
+
+    private void GoToTimeline()
+    {
+        if (string.IsNullOrWhiteSpace(_patientId)) return;
+        Nav.NavigateTo($"/timeline/{Uri.EscapeDataString(_patientId.Trim())}");
+    }
+}

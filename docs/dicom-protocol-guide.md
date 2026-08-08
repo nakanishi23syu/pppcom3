@@ -4,6 +4,11 @@
 > 学習用資料です。実装コード自体にも非常に丁寧な日本語コメントを入れているので、
 > このドキュメントと実装コードを行き来しながら読むことを想定しています。
 >
+> **DICOMそのものが初めて、医療の知識もDICOM用語も前提知識ゼロという場合**は、先に
+> [`docs/dicom-protocol-for-beginners.md`](./dicom-protocol-for-beginners.md)（たとえ話中心の
+> 超入門編）を読んでから本ドキュメントに戻ってくることをお勧めします。用語や結論は
+> 矛盾しないよう揃えてあります。
+>
 > 関連ファイル:
 > - `services/DicomTool.DicomScp/Services/DicomScpService.cs` … SCP(受信側)本体
 > - `services/DicomTool.DicomScp/Services/DicomScpHostedService.cs` … SCPをASP.NET Coreホストに載せる橋渡し役

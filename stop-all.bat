@@ -1,27 +1,30 @@
 @echo off
 REM ============================================================
 REM stop-all.bat
-REM ホストPC側のTrayAppを止め、VM(dicom-pacs-vm)をシャットダウン
-REM するための一括終了バッチ。
+REM Stops the TrayApp on this PC, then shuts down the VM
+REM (dicom-pacs-vm) over SSH.
 REM
-REM VM側の各サービス(PostgreSQL/IIS/NSSM各種)はすべて「自動」
-REM 起動設定のWindowsサービスなので、OSシャットダウン時にOS側が
-REM 自動的に正常停止してくれる。個別に nssm stop する必要はない。
+REM All VM-side services (PostgreSQL/IIS/NSSM-managed) are set
+REM to auto-start, so Windows shutdown stops them cleanly on its
+REM own. No need to stop each one individually.
 REM
-REM 注意: cmd.exeが日本語(Shift-JIS)のechoを取りこぼして誤動作
-REM する事故が過去にあったため、echo等の出力メッセージは
-REM 英語のみにしてある。日本語はREMコメントとしてのみ使用する。
+REM NOTE: This file must contain ASCII only (no Japanese), even
+REM in comments. cmd.exe on this machine has repeatedly
+REM misinterpreted multi-byte UTF-8 text as Shift-JIS, corrupting
+REM the parsed script and executing garbage as commands. Keep
+REM all text in this file plain ASCII.
 REM ============================================================
 setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
 REM ------------------------------------------------------------
-REM 0. 設定値
+REM 0. Settings
 REM ------------------------------------------------------------
 
-REM ★ start-all.batと同じ値にしてください（vmrunで状態確認する場合のみ使用）
-set VMX_PATH=C:\path\to\your\vm.vmx
+REM Keep this the same as VMX_PATH in start-all.bat (only used
+REM for the optional vmrun power-state check below).
+set VMX_PATH=D:\Programming\VMware\Windows Server 2025.vmx
 
 set VMRUN=C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe
 if not exist "%VMRUN%" set VMRUN=C:\Program Files\VMware\VMware Workstation\vmrun.exe
@@ -32,7 +35,7 @@ echo  dicom-tool-3 : stop-all
 echo ============================================================
 
 REM ------------------------------------------------------------
-REM 1. ホストPC側のTrayAppを停止する
+REM 1. Stop TrayApp on this PC
 REM ------------------------------------------------------------
 echo [1/3] Stopping DicomTool.TrayApp on this PC (if running) ...
 tasklist /fi "imagename eq DicomTool.TrayApp.exe" 2>nul | findstr /i "DicomTool.TrayApp.exe" >nul
@@ -44,23 +47,30 @@ if not errorlevel 1 (
 )
 
 REM ------------------------------------------------------------
-REM 2. VMをシャットダウンする（SSH経由）
-REM    VM側サービスは自動起動設定のWindowsサービスなので、
-REM    シャットダウン時にOSが自動的に正常停止してくれる。
+REM 2. Shut down the VM over SSH.
+REM    VM-side services are all auto-start Windows services, so
+REM    OS shutdown stops them cleanly by itself.
 REM ------------------------------------------------------------
 echo [2/3] Shutting down the VM via SSH ...
-ssh -o ConnectTimeout=10 -o BatchMode=yes %SSH_HOST% "shutdown /s /t 0"
+REM /f is required here: the VM normally has an active interactive
+REM console session (someone logged into the VM's own desktop,
+REM e.g. via the VMware console window). Without /f, Windows waits
+REM for that session's programs to close gracefully and can show a
+REM confirmation prompt ON THE VM'S OWN SCREEN that nobody is
+REM watching, so the shutdown appears to just hang forever. /f
+REM forcibly closes running applications without prompting.
+ssh -o ConnectTimeout=10 -o BatchMode=yes %SSH_HOST% "shutdown /s /f /t 0"
 if errorlevel 1 (
     echo WARNING: Could not reach the VM via SSH. It may already be off,
     echo or unreachable. Please check manually if needed.
     goto done
 ) else (
-    echo Shutdown command sent. The VM (and all its auto-start services)
+    echo Shutdown command sent. The VM and all its auto-start services
     echo will stop shortly.
 )
 
 REM ------------------------------------------------------------
-REM 3. (任意) vmrunでVM状態を確認する
+REM 3. (optional) Confirm VM power-off via vmrun
 REM ------------------------------------------------------------
 if exist "%VMRUN%" (
     echo [3/3] Waiting for the VM to power off (checking via vmrun) ...

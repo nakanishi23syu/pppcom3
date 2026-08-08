@@ -1,30 +1,31 @@
 @echo off
 REM ============================================================
 REM start-all.bat
-REM VM(dicom-pacs-vm)を起動し、SSH疎通を待ち、VM側サービスの
-REM 生死を確認・必要なら起動し、最後にホストPC側のTrayAppを
-REM 起動するための一括起動バッチ。
+REM Starts the VM (dicom-pacs-vm), waits for SSH, checks/starts
+REM the VM-side services, and finally starts the TrayApp on this
+REM PC.
 REM
-REM 注意: cmd.exeが日本語(Shift-JIS)のechoを取りこぼして誤動作
-REM する事故が過去にあったため、echo等の出力メッセージは
-REM 英語のみにしてある。日本語はREMコメントとしてのみ使用する。
+REM NOTE: This file must contain ASCII only (no Japanese), even
+REM in comments. cmd.exe on this machine has repeatedly
+REM misinterpreted multi-byte UTF-8 text as Shift-JIS, corrupting
+REM the parsed script and executing garbage as commands. Keep
+REM all text in this file plain ASCII.
 REM ============================================================
 setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
 REM ------------------------------------------------------------
-REM 0. 設定値（環境に合わせて書き換えるのはここだけでよい）
+REM 0. Settings (this is the only section you should need to edit)
 REM ------------------------------------------------------------
 
-REM ★★★ ここを、ご自身のVMのvmxファイルパスに書き換えてください ★★★
-REM   VMware Workstationでvmxファイルの場所を確認する方法:
-REM   VMware Workstationのライブラリでこの仮想マシンを右クリック
-REM   →「設定」→ 上部タブに表示されるパス、もしくは
-REM   仮想マシンを選択した状態で「編集」→「仮想マシン設定」の
-REM   ウィンドウタイトルバーにフルパスが表示されることが多い。
-REM   （既定の保存先は %USERPROFILE%\Documents\Virtual Machines\ 配下）
-set VMX_PATH=C:\path\to\your\vm.vmx
+REM *** Edit this to point at your own VM's .vmx file ***
+REM   To find it in VMware Workstation: right-click the VM in the
+REM   Library, choose "Settings", the path is shown near the top
+REM   of that window (or in the window title bar).
+REM   Default VM storage location is usually under:
+REM   %USERPROFILE%\Documents\Virtual Machines\
+set VMX_PATH=D:\Programming\VMware\Windows Server 2025.vmx
 
 set VMRUN=C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe
 if not exist "%VMRUN%" set VMRUN=C:\Program Files\VMware\VMware Workstation\vmrun.exe
@@ -33,8 +34,9 @@ set REMOTE_HOST_IP=192.168.93.128
 set TRAYAPP_PROJECT=services\DicomTool.TrayApp
 set SSH_WAIT_TIMEOUT_SEC=120
 
-REM VM上のnssm.exeのフルパス（VM構築手順.md 16章の例に合わせた既定値。
-REM 実際に配置した場所が違う場合はここを書き換える）
+REM Full path to nssm.exe on the VM (matches the example in
+REM VM construction guide chapter 16; change if you placed it
+REM somewhere else).
 set NSSM_REMOTE_PATH=C:\Tools\nssm.exe
 
 echo ============================================================
@@ -42,7 +44,7 @@ echo  dicom-tool-3 : start-all
 echo ============================================================
 
 REM ------------------------------------------------------------
-REM 1. VMware WorkstationでVMを起動する（vmrunがある場合のみ）
+REM 1. Start the VM via vmrun (if available)
 REM ------------------------------------------------------------
 if exist "%VMRUN%" (
     echo [1/5] Starting VM via vmrun ...
@@ -60,7 +62,7 @@ if exist "%VMRUN%" (
 )
 
 REM ------------------------------------------------------------
-REM 2. SSH疎通待ち（リトライループ、タイムアウトあり）
+REM 2. Wait for SSH to become reachable (retry loop with timeout)
 REM ------------------------------------------------------------
 echo [2/5] Waiting for SSH to become reachable on %SSH_HOST% (timeout: %SSH_WAIT_TIMEOUT_SEC%s) ...
 set /a SSH_ELAPSED=0
@@ -88,7 +90,8 @@ if "%SSH_OK%"=="1" (
 )
 
 REM ------------------------------------------------------------
-REM 3. 主要ポートの生死確認＋必要ならNSSMサービス起動
+REM 3. Check key service ports, start any NSSM services that
+REM    are not already running
 REM ------------------------------------------------------------
 echo [3/5] Checking key service ports on the VM ...
 ssh %SSH_HOST% "netstat -ano | findstr \":5030 :3100 :3200 :5230 :7233 :11112\""
@@ -105,7 +108,7 @@ echo Service start attempts finished (services already running will just report 
 :skip_remote_checks
 
 REM ------------------------------------------------------------
-REM 4. ホストPC側のTrayAppを起動する（未起動の場合のみ）
+REM 4. Start TrayApp on this PC (only if not already running)
 REM ------------------------------------------------------------
 echo [4/5] Checking DicomTool.TrayApp on this PC ...
 tasklist /fi "imagename eq DicomTool.TrayApp.exe" 2>nul | findstr /i "DicomTool.TrayApp.exe" >nul
@@ -113,9 +116,10 @@ if not errorlevel 1 (
     echo DicomTool.TrayApp is already running. Skipping.
 ) else (
     echo Starting DicomTool.TrayApp with RemoteHost=%REMOTE_HOST_IP% ...
-    REM 注意: startコマンドの引数内で複数階層の二重引用符をネストすると
-    REM cmd.exeが誤解釈することがあるため、一時的な起動用batを生成してから
-    REM それをstartで開く方式にしている（引用符ネスト事故を避けるため）。
+    REM NOTE: nesting multiple levels of double quotes inside a
+    REM "start" command argument confuses cmd.exe's parser, so we
+    REM generate a small temp launcher .bat first and open that
+    REM instead (avoids the quote-nesting problem entirely).
     set "TRAYAPP_LAUNCHER=%TEMP%\dicomtool_start_trayapp.bat"
     > "!TRAYAPP_LAUNCHER!" (
         echo @echo off
@@ -127,7 +131,7 @@ if not errorlevel 1 (
 )
 
 REM ------------------------------------------------------------
-REM 5. URL一覧を表示して終了
+REM 5. Print URLs and finish
 REM ------------------------------------------------------------
 echo [5/5] Done. Useful URLs:
 echo   Worklist       : http://%REMOTE_HOST_IP%:3100

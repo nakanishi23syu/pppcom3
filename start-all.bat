@@ -141,5 +141,7 @@ echo   Backend API    : http://%REMOTE_HOST_IP%:5030/graphql
 echo   DICOM SCP Mgmt : http://%REMOTE_HOST_IP%:8090/swagger
 echo   Temporal Web UI: http://%REMOTE_HOST_IP%:8233
 echo ============================================================
+echo Press any key to close this window (the URLs above stay visible until then).
+pause >nul
 
 endlocal

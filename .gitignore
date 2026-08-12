@@ -31,6 +31,8 @@ infra/data/dicom-incoming/*
 tests/e2e/output/
 __pycache__/
 *.pyc
+venv/
+.venv/
 
 # ===== 環境設定・秘密情報 =====
 .env
@@ -45,6 +47,7 @@ deploy.txt
 .vs/
 .vscode/*
 !.vscode/extensions.json
+.idea/
 *.swp
 
 # ===== Claude Code サブエージェント用worktree =====

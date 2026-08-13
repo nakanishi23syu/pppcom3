@@ -1,8 +1,10 @@
 using System.Text;
 using DicomTool.Shared.Constants;
 using DicomTool.Shared.Contracts;
+using DicomTool.Shared.Entities;
 using FellowOakDicom;
 using FellowOakDicom.Network;
+using FellowOakDicom.Network.Client;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace DicomTool.DicomScp.Services;
@@ -29,7 +31,9 @@ namespace DicomTool.DicomScp.Services;
 //   ・IDicomServiceProvider    … アソシエーション確立/解放/切断など、接続そのもののライフサイクルを扱う。
 //   ・IDicomCEchoProvider      … C-ECHO(疎通確認)サービスクラスの受信側としての振る舞いを定義する。
 //   ・IDicomCStoreProvider     … C-STORE(画像保存)サービスクラスの受信側としての振る舞いを定義する。
-public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoProvider, IDicomCStoreProvider
+public class DicomScpService :
+    DicomService, IDicomServiceProvider, IDicomCEchoProvider, IDicomCStoreProvider,
+    IDicomCFindProvider, IDicomCMoveProvider
 {
     // このSCPが受け入れる転送構文(Transfer Syntax)の一覧。
     // 転送構文とは「DICOMデータセットをバイト列としてどう符号化するか」の取り決めで、
@@ -53,6 +57,9 @@ public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoP
     private readonly ILogger<DicomScpService> _appLogger;
     private readonly ITemporalWorkflowStarter _workflowStarter;
     private readonly IHostEnvironment _hostEnvironment;
+    private readonly IDicomQueryService _queryService;
+    private readonly IRemoteAeRegistry _remoteAeRegistry;
+    private readonly IDicomClientFactory _dicomClientFactory;
 
     // ------------------------------------------------------------------------------------
     // コンストラクタ
@@ -60,9 +67,11 @@ public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoP
     // fo-dicomのDI統合(Services/DicomScpHostedService.cs で AddFellowOakDicom() 経由で登録)は、
     // 「stream / fallbackEncoding / log / dependencies」というDicomServer側が用意する4引数に加えて、
     // ASP.NET CoreのDIコンテナに登録済みの任意のサービス(ここではILogger<T>・Temporal起動役・
-    // IHostEnvironment)をコンストラクタインジェクションできる。
-    // これにより「1接続ごとに新しいインスタンスが作られる」DICOM側の設計と、
-    // 「アプリ全体で共有したいサービス(Temporalクライアント等)」を無理なく両立できる。
+    // IHostEnvironment・DBクエリ役・リモートAE登録簿・SCUクライアントファクトリ)を
+    // コンストラクタインジェクションできる。DicomDbContext(IDicomQueryService経由)はScopedだが、
+    // fo-dicomは「1接続ごとに新しいDIスコープ」も一緒に作ってくれるため、Scopedサービスを
+    // そのままコンストラクタインジェクションしても安全（=1接続=1トランザクション境界、という
+    // ASP.NET CoreのHTTPリクエストと同じ感覚で扱える）。
     public DicomScpService(
         INetworkStream stream,
         Encoding fallbackEncoding,
@@ -70,12 +79,18 @@ public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoP
         DicomServiceDependencies dependencies,
         ILogger<DicomScpService> appLogger,
         ITemporalWorkflowStarter workflowStarter,
-        IHostEnvironment hostEnvironment)
+        IHostEnvironment hostEnvironment,
+        IDicomQueryService queryService,
+        IRemoteAeRegistry remoteAeRegistry,
+        IDicomClientFactory dicomClientFactory)
         : base(stream, fallbackEncoding, log, dependencies)
     {
         _appLogger = appLogger;
         _workflowStarter = workflowStarter;
         _hostEnvironment = hostEnvironment;
+        _queryService = queryService;
+        _remoteAeRegistry = remoteAeRegistry;
+        _dicomClientFactory = dicomClientFactory;
     }
 
     // ======================================================================================
@@ -283,5 +298,231 @@ public class DicomScpService : DicomService, IDicomServiceProvider, IDicomCEchoP
     {
         _appLogger.LogError(e, "C-STORE要求の処理中に例外が発生しました。一時ファイル={TempFileName}", tempFileName);
         return Task.CompletedTask;
+    }
+
+    // ======================================================================================
+    // C-FIND ― 検索サービス
+    // ======================================================================================
+    // C-FINDは「1回の要求」に対して「複数件のPending応答(1件ずつ、マッチしたレコード1つ分の
+    // タグを載せて)」を返し、最後に1回だけFinal応答(Success)を返す、という応答の形が
+    // C-ECHO/C-STOREと大きく異なる(IAsyncEnumerableで表現するのはこのため)。
+    // このプロジェクトではSTUDY階層・SERIES階層のみ対応する(PATIENT/IMAGE階層は非対応。
+    // docs/dicom-testing-tools/dcmtk.md参照)。検索条件の解釈自体はDicomQueryService(C-MOVEとも
+    // 共通)に委譲し、ここでは「DBの検索結果をDICOMの応答データセットに詰め替える」ことに専念する。
+    public async IAsyncEnumerable<DicomCFindResponse> OnCFindRequestAsync(DicomCFindRequest request)
+    {
+        var cancellationToken = CancellationToken.None;
+        _appLogger.LogInformation("C-FIND要求を受信しました。Level={Level}", request.Level);
+
+        if (request.Level == DicomQueryRetrieveLevel.Study)
+        {
+            var studies = await _queryService.FindStudiesAsync(request.Dataset, cancellationToken).ConfigureAwait(false);
+            _appLogger.LogInformation("C-FIND(STUDY階層)がマッチしたStudy件数={Count}", studies.Count);
+            foreach (var study in studies)
+            {
+                yield return new DicomCFindResponse(request, DicomStatus.Pending) { Dataset = BuildStudyResponseDataset(study) };
+            }
+        }
+        else if (request.Level == DicomQueryRetrieveLevel.Series)
+        {
+            var seriesList = await _queryService.FindSeriesAsync(request.Dataset, cancellationToken).ConfigureAwait(false);
+            _appLogger.LogInformation("C-FIND(SERIES階層)がマッチしたSeries件数={Count}", seriesList.Count);
+            foreach (var series in seriesList)
+            {
+                yield return new DicomCFindResponse(request, DicomStatus.Pending) { Dataset = BuildSeriesResponseDataset(series) };
+            }
+        }
+        else
+        {
+            // PATIENT/IMAGE階層は未対応。0件ヒットとして扱い、Successで終える
+            // (エラーにはしない＝「対応していない検索軸だが、要求自体は正しく処理できた」という扱い)。
+            _appLogger.LogWarning("未対応のQuery/Retrieve階層のC-FIND要求です。Level={Level}", request.Level);
+        }
+
+        yield return new DicomCFindResponse(request, DicomStatus.Success);
+    }
+
+    // ======================================================================================
+    // C-MOVE ― 検索結果を指定した宛先AEへC-STOREで転送させるサービス
+    // ======================================================================================
+    // C-MOVEはC-FINDと同じ検索条件の書式を使うが、応答としてタグ一覧を返す代わりに、
+    // このSCP自身がSCUの顔になって(=自分のAEタイトルを名乗って)、マッチしたファイルを
+    // request.DestinationAEへC-STOREで送り届ける、という「受信も送信もする」サービスクラス。
+    // 転送先AEタイトルからホスト/ポートを引く手段が必要になるため、RemoteAeRegistry
+    // (appsettings.jsonの"RemoteAeTitles"セクション。docs/dicom-testing-tools/dcmtk.md参照)を使う。
+    public async IAsyncEnumerable<DicomCMoveResponse> OnCMoveRequestAsync(DicomCMoveRequest request)
+    {
+        var cancellationToken = CancellationToken.None;
+        _appLogger.LogInformation(
+            "C-MOVE要求を受信しました。Level={Level}, DestinationAE={DestinationAE}",
+            request.Level, request.DestinationAE);
+
+        if (!_remoteAeRegistry.TryResolve(request.DestinationAE, out var destHost, out var destPort))
+        {
+            _appLogger.LogWarning(
+                "C-MOVEの転送先AE '{DestinationAE}' がappsettings.jsonのRemoteAeTitlesに未登録のため、失敗を返します。",
+                request.DestinationAE);
+            yield return new DicomCMoveResponse(request, DicomStatus.QueryRetrieveMoveDestinationUnknown);
+            yield break;
+        }
+
+        List<UserSop> sopsToSend;
+        if (request.Level == DicomQueryRetrieveLevel.Study)
+        {
+            var studies = await _queryService.FindStudiesAsync(request.Dataset, cancellationToken).ConfigureAwait(false);
+            sopsToSend = studies.SelectMany(s => s.Series).SelectMany(se => se.Sops).ToList();
+        }
+        else if (request.Level == DicomQueryRetrieveLevel.Series)
+        {
+            var seriesList = await _queryService.FindSeriesAsync(request.Dataset, cancellationToken).ConfigureAwait(false);
+            sopsToSend = seriesList.SelectMany(se => se.Sops).ToList();
+        }
+        else
+        {
+            _appLogger.LogWarning("未対応のQuery/Retrieve階層のC-MOVE要求です。Level={Level}", request.Level);
+            sopsToSend = [];
+        }
+
+        _appLogger.LogInformation("C-MOVE対象のSOPInstance件数={Count}", sopsToSend.Count);
+
+        if (sopsToSend.Count == 0)
+        {
+            yield return new DicomCMoveResponse(request, DicomStatus.Success)
+            {
+                Remaining = 0,
+                Completed = 0,
+                Failures = 0,
+            };
+            yield break;
+        }
+
+        var storageRoot = StoragePaths.ResolveStoragePath(_hostEnvironment.ContentRootPath);
+
+        // 転送先へは、このSCP自身が(受信側ではなく)SCUとして自分のAEタイトルを名乗って接続する。
+        // DicomScuTestService.csと同じDicomClientFactory経由の使い方(1アソシエーション内に
+        // 複数のC-STORE要求をまとめて積んで、最後に1回SendAsyncする＝連続転送)。
+        var client = _dicomClientFactory.Create(
+            destHost, destPort, useTls: false,
+            callingAe: DicomNetworkConstants.OwnAeTitle,
+            calledAe: request.DestinationAE);
+
+        var completed = 0;
+        var failures = 0;
+
+        // 【学習ポイント】yield returnはtry/catch(catch節を持つtryブロック)の中には書けない
+        // (C#の言語仕様上の制約)。そのため「転送先への接続/送信で例外が起きた」という事実だけを
+        // tryの外へ持ち出し、応答をyield returnするのはtry/catchを抜けた後にする。
+        // これが無いと、Orthanc等の宛先にファイアウォール等で到達できない場合に例外がそのまま
+        // このメソッドの外(fo-dicomの受信ループ)まで伝播し、C-MOVEを要求してきたSCU側との
+        // アソシエーションごと強制切断されてしまう(元々のバグ。実際にOrthancへのポートが
+        // ファイアウォールで塞がっていた際に発生を確認した)。C-MOVEの作法としては、
+        // 転送先に届かなかった場合も「届かなかった」という結果をC-MOVE応答として返すのが正しい。
+        Exception? transferException = null;
+        try
+        {
+            foreach (var sop in sopsToSend)
+            {
+                var filePath = Path.Combine(storageRoot, sop.FilePath);
+                if (!File.Exists(filePath))
+                {
+                    _appLogger.LogWarning(
+                        "C-MOVE対象ファイルがストレージに見つかりません。SOPInstanceUID={SopInstanceUid}, Path={FilePath}",
+                        sop.SopInstanceUid, filePath);
+                    failures++;
+                    continue;
+                }
+
+                var dicomFile = await DicomFile.OpenAsync(filePath).ConfigureAwait(false);
+                var storeRequest = new DicomCStoreRequest(dicomFile)
+                {
+                    OnResponseReceived = (_, response) =>
+                    {
+                        if (response.Status == DicomStatus.Success)
+                        {
+                            completed++;
+                        }
+                        else
+                        {
+                            failures++;
+                        }
+                    },
+                };
+                await client.AddRequestAsync(storeRequest).ConfigureAwait(false);
+            }
+
+            await client.SendAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            transferException = ex;
+        }
+
+        if (transferException is not null)
+        {
+            _appLogger.LogError(
+                transferException,
+                "C-MOVEの転送先への接続/送信でエラーが発生しました。DestinationAE={DestinationAE} ({Host}:{Port})",
+                request.DestinationAE, destHost, destPort);
+            yield return new DicomCMoveResponse(request, DicomStatus.QueryRetrieveUnableToPerformSuboperations)
+            {
+                Remaining = 0,
+                Completed = completed,
+                Failures = sopsToSend.Count - completed,
+            };
+            yield break;
+        }
+
+        _appLogger.LogInformation(
+            "C-MOVEが完了しました。DestinationAE={DestinationAE}, Completed={Completed}, Failures={Failures}",
+            request.DestinationAE, completed, failures);
+
+        var finalStatus = failures == 0 ? DicomStatus.Success : DicomStatus.QueryRetrieveSubOpsOneOrMoreFailures;
+        yield return new DicomCMoveResponse(request, finalStatus)
+        {
+            Remaining = 0,
+            Completed = completed,
+            Failures = failures,
+        };
+    }
+
+    // ── C-FIND応答データセットの組み立て ──
+    // Orthancの実際の応答(docs/dicom-testing-tools/orthanc.md参照)に合わせ、
+    // RetrieveAETitle(このSCP自身のAEタイトル＝C-MOVEの転送元として指定する時に使う情報)も含める。
+    private static DicomDataset BuildStudyResponseDataset(UserStudy study)
+    {
+        var dataset = new DicomDataset
+        {
+            { DicomTag.QueryRetrieveLevel, "STUDY" },
+            { DicomTag.RetrieveAETitle, DicomNetworkConstants.OwnAeTitle },
+            { DicomTag.PatientID, study.PatientId },
+            { DicomTag.PatientName, study.PatientName },
+            { DicomTag.StudyInstanceUID, study.StudyInstanceUid },
+            { DicomTag.StudyDate, study.StudyDate.ToString("yyyyMMdd") },
+            { DicomTag.StudyDescription, study.StudyDescription },
+            { DicomTag.AccessionNumber, study.AccessionNumber },
+            { DicomTag.ModalitiesInStudy, study.Modality },
+            { DicomTag.NumberOfStudyRelatedSeries, study.Series.Count.ToString() },
+            { DicomTag.NumberOfStudyRelatedInstances, study.Series.Sum(se => se.Sops.Count).ToString() },
+        };
+        return dataset;
+    }
+
+    private static DicomDataset BuildSeriesResponseDataset(UserSeries series)
+    {
+        var dataset = new DicomDataset
+        {
+            { DicomTag.QueryRetrieveLevel, "SERIES" },
+            { DicomTag.RetrieveAETitle, DicomNetworkConstants.OwnAeTitle },
+            { DicomTag.SeriesInstanceUID, series.SeriesInstanceUid },
+            { DicomTag.SeriesNumber, series.SeriesNumber },
+            { DicomTag.SeriesDescription, series.SeriesDescription },
+            { DicomTag.Modality, series.Modality },
+            { DicomTag.NumberOfSeriesRelatedInstances, series.Sops.Count.ToString() },
+        };
+        if (series.Study is not null)
+        {
+            dataset.Add(DicomTag.StudyInstanceUID, series.Study.StudyInstanceUid);
+        }
+        return dataset;
     }
 }

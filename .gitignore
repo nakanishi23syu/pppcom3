@@ -34,6 +34,11 @@ __pycache__/
 venv/
 .venv/
 
+# ===== tools/ 配下の各ツールの実行時出力 =====
+# tools/はツールごとにサブフォルダを作る方針（例: tools/dicom_test_data_generator/）。
+# 各ツールのoutput/フォルダは生成される使い捨てデータのため、深さを問わず除外する。
+tools/**/output/
+
 # ===== 環境設定・秘密情報 =====
 .env
 .env.*

@@ -1,6 +1,6 @@
 # インフラ構成図（PlantUML）
 
-> このドキュメントは、実際にVM上にどうデプロイされているか（[`VM構築手順.md`](../VM構築手順.md)
+> このドキュメントは、実際にVM上にどうデプロイされているか（[`VM構築手順.md`](./VM構築手順.md)
 > 24章のファイアウォール一覧が一次情報源）と、ポート番号の唯一の正である
 > [`shared/DicomTool.Shared/Constants/ServicePorts.cs`](../shared/DicomTool.Shared/Constants/ServicePorts.cs)
 > を元に、現在のインフラ構成をPlantUML図として可視化したものです。

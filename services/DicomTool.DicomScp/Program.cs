@@ -1,6 +1,8 @@
 using DicomTool.DicomScp.Services;
 using DicomTool.Shared.Constants;
+using DicomTool.Shared.Data;
 using FellowOakDicom;
+using Microsoft.EntityFrameworkCore;
 
 // ==========================================================================================
 // Program.cs ― DicomTool.DicomScp のエントリポイント
@@ -31,6 +33,29 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{ServicePorts.DicomScpManagementHttp}")
 // IDicomClientFactory(SCU=送信側を作る)などがDIコンテナに登録され、
 // DicomScpService/DicomScuTestServiceのコンストラクタで受け取れるようになる。
 builder.Services.AddFellowOakDicom();
+
+// --------------------------------------------------------------------------------
+// DicomDbContext のDI登録(C-FIND/C-MOVE SCPが登録済みStudy/Series/Sopを検索するために使う)。
+// --------------------------------------------------------------------------------
+// services/DicomTool.Worker/Program.csと同じパターン。マイグレーション適用(db.Database.Migrate())は
+// docs/CONTRACT.md 7章の規約によりbackend/DicomTool.Apiだけが行うため、ここでは呼び出さない
+// (＝backend/DicomTool.Apiを先に一度起動してスキーマを作成しておく必要がある)。
+var connectionString = builder.Configuration.GetConnectionString("Dicom")
+    ?? throw new InvalidOperationException(
+        "接続文字列 ConnectionStrings:Dicom が設定されていません。" +
+        "appsettings.Development.json（本番はappsettings.Production.json）または" +
+        "環境変数 ConnectionStrings__Dicom を確認してください。");
+
+builder.Services.AddDbContext<DicomDbContext>(options => options.UseNpgsql(connectionString));
+
+// C-FIND/C-MOVEの検索条件解釈(DBクエリ)を担当。DicomDbContextを使うためScoped
+// (fo-dicomは1接続ごとに新しいDIスコープを作るため、DicomScpServiceのコンストラクタで
+// そのまま安全に受け取れる。Services/DicomScpService.cs参照)。
+builder.Services.AddScoped<IDicomQueryService, DicomQueryService>();
+
+// C-MOVEの転送先AEタイトル → host:port の対応表。appsettings.jsonの"RemoteAeTitles"セクションを
+// 読み込むだけなので状態を持たず、Singletonで使い回してよい。
+builder.Services.AddSingleton<IRemoteAeRegistry, RemoteAeRegistry>();
 
 // Temporalワークフロー起動役。C-STORE受信のたびに使うのでシングルトンで使い回す
 // (内部でTemporal Serverへの接続(gRPCチャネル)も一度確立したら使い回すよう実装している)。

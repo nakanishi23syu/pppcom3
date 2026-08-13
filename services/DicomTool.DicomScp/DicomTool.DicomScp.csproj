@@ -42,6 +42,20 @@
     <!-- Temporal .NET SDK。docs/CONTRACT.md 4章の「型なしクライアントAPI」で
          UploadDicomWorkflowを起動するために使う（Workflow実装本体はServices/DicomTool.Workerが持つ）。 -->
     <PackageReference Include="Temporalio" Version="1.17.0" />
+
+    <!--
+      DicomDbContextはshared/DicomTool.Shared側で定義されているが、UseNpgsql(...)の呼び出しと
+      DIコンテナへのAddDbContext登録はホスト側であるこのProgram.csが担う責務のため、
+      プロバイダ本体とdotnet efツール連携用のDesignパッケージをこちらにも明示的に追加する
+      （services/DicomTool.Worker/DicomTool.Worker.csprojと同じ理由・同じバージョン）。
+      C-FIND/C-MOVE SCP実装（Services/DicomScpService.cs）が、登録済みStudy/Series/Sopを
+      検索するためにDBへ問い合わせる必要があるため追加した。
+    -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

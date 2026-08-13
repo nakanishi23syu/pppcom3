@@ -1,0 +1,4 @@
+# tools/ を実行するために必要なPythonパッケージ。
+# インストール方法: pip install -r tools/requirements.txt
+
+pydicom>=2.4

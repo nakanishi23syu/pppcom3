@@ -11,7 +11,7 @@
 | サービス | 技術 | ディレクトリ | ポート | 役割 |
 |---|---|---|---|---|
 | Backend API | C# / HotChocolate(GraphQL) / EF Core | `backend/DicomTool.Api` | **5030** | 検査・シリーズ・画像のCRUD、認証、`uploadDicomFiles` Mutation（旧経路） |
-| DICOM SCU/SCP | C# / fo-dicom | `services/DicomTool.DicomScp` | **11112**(DIMSE) / **8090**(管理REST+Swagger) | C-ECHO/C-STORE受信（新経路）、疎通テスト |
+| DICOM SCU/SCP | C# / fo-dicom | `services/DicomTool.DicomScp` | **11112**(DIMSE) / **8090**(管理REST+Swagger) | C-ECHO/C-STORE受信（新経路）、C-FIND/C-MOVE応答（検索・転送依頼の受け側）、疎通テスト |
 | Temporal Worker | C# / Temporal SDK | `services/DicomTool.Worker` | (待受ポートなし。Temporal Serverに接続しにいく側) | アップロード/削除ワークフローの実行 |
 | 常駐トレイアプリ | C# / WinForms + Minimal API | `services/DicomTool.TrayApp` | **5299** | ワークリストからの起動命令をHTTPで受信し、Timelineをブラウザで開く |
 | Worklist | Nuxt3 | `frontend/worklist` | **3100** | 検査一覧表示、右クリックでTimeline起動命令を送信 |
@@ -99,6 +99,24 @@ Task Queue名とWorkflow Type名という「文字列の約束事」だけで疎
 AEタイトルはDICOM規格上、最大16文字の大文字英数字（規格上は許容範囲がやや緩いが実務慣習として大文字推奨）。
 本番のPACS相手と通信する場合は相手先のAEタイトル・IP・ポートを別途確認する必要がある
 （`手動セットアップ手順.md` に接続先を切り替える手順を記載）。
+
+### 5-1. C-FIND/C-MOVEの対応範囲
+
+`DicomTool.DicomScp`はC-ECHO/C-STOREに加え、C-FIND（検索）・C-MOVE（転送依頼の受け側）にも
+対応する（`Services/DicomScpService.cs`が`IDicomCFindProvider`/`IDicomCMoveProvider`を実装）。
+対応する階層はSTUDY・SERIESのみ（PATIENT・IMAGEは0件ヒット扱い）。検索条件の解釈は
+`Services/DicomQueryService.cs`が担い、`shared/DicomTool.Shared`のエンティティ
+（UserStudy/UserSeries/UserSop）に対してEF Core経由でクエリする。
+
+C-MOVEの転送先（宛先AEタイトル→host:port）は、`appsettings.json`系の`RemoteAeTitles`
+セクションに事前登録しておく必要がある（`Services/RemoteAeRegistry.cs`）。未登録のAEタイトルへ
+C-MOVEしようとすると`Refused: MoveDestinationUnknown`で失敗する。値は環境（どこにOrthanc等が
+あるか）依存のため、ベースの`appsettings.json`には入れず、`appsettings.Development.json`
+（ローカル開発用）・`appsettings.Production.json`（VM上、Git管理外）にそれぞれ置く。
+
+実際に検証済みのコマンド・既知の注意点（DICOMのAEタイトルは最大16文字である点、
+VM⇔ホストPC間の通信にはWindowsファイアウォールの受信許可が別途必要な点等）は
+`docs/dicom-testing-tools/dcmtk.md`にまとめてある。
 
 ## 6. ストレージパス規約
 

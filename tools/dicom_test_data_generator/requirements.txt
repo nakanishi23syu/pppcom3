@@ -2,3 +2,5 @@
 # インストール方法: pip install -r tools/requirements.txt
 
 pydicom>=2.4
+# dicom_seg_sample_generator.pyがSEG(Segmentation Storage)の生成に使う。
+highdicom>=0.24

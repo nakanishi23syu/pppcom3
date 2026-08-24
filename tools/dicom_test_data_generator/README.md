@@ -19,7 +19,9 @@ tools/dicom_test_data_generator/
 ├── dicom_tag_editor.py
 ├── dicom_study_builder.py
 ├── dicom_bulk_patient_generator.py
+├── dicom_seg_sample_generator.py
 ├── input/                … コピー元の元画像を置く場所（サンプルを同梱済み）
+├── samples/              … 生成物をgit管理下でそのまま同梱している場所（seg_sample等）
 └── output/               … 生成結果の出力先（.gitignore対象、実行すると自動作成される）
 ```
 
@@ -105,6 +107,41 @@ Worklist上での複数シリーズ表示や、Viewerでのシリーズ切り替
 | `series_per_patient` / `instances_per_series` | 患者1人あたりのSeries数・Instance数 |
 | `use_random_patient_id` | `True`なら`uuid`ベースのランダムID、`False`なら連番 |
 | `patient_id_prefix` | 連番方式の時の接頭辞（例: `BULK` → `BULK0001`） |
+
+### 4. `dicom_seg_sample_generator.py` — SEG(Segmentation Storage)のサンプルを生成する
+
+モダリティにSEGが付く、Segmentation Storage（SOP Class UID
+`1.2.840.10008.5.1.4.1.1.66.4`）のサンプルデータを生成します。「セグメンテーション表示・
+取り込みを試したいが手元にSEGデータがない」場合に使います。
+
+SEGは他モダリティと違い、`ReferencedSeriesSequence`/`SourceImageSequence`/
+`FrameOfReferenceUID`などで元画像シリーズ側とタグの整合性が取れていないと、多くの
+ビューワ・バリデータに弾かれます。既存の`input/sample1.dcm`等（Secondary Capture、
+位置情報タグなし）はSEGの元画像として使えないため、このスクリプトは幾何情報
+（`PixelSpacing`/`ImagePositionPatient`/`ImageOrientationPatient`等）を正しく持つ
+疑似CT断面画像シリーズを自前で組み立て、それを参照する形でSEGを生成します。
+参照関係の整合性は[highdicom](https://github.com/ImagingDataCommons/highdicom)
+（DICOM標準準拠のSEG/SR等を組み立てるためのpydicom拡張ライブラリ）に任せているので、
+手組みでタグを埋めるより整合性の取り違えが起きにくい作りです。
+
+`main()`内で書き換えられるパラメータ:
+
+| パラメータ | 内容 |
+| --- | --- |
+| `output_dir` | 出力フォルダ（`source_ct/`にソースCT、直下に`segmentation.dcm`が出力される） |
+| `rows` / `columns` / `num_slices` | ソースCTシリーズの画像サイズ・断面数 |
+| `pixel_spacing_mm` / `slice_spacing_mm` | 画素間隔・断面間隔（mm） |
+| `patient_id` / `patient_name` / `study_description` | 患者・Study情報 |
+| `segment_label` / `segmented_property_category` / `segmented_property_type` | セグメントのラベルとSNOMED CTコード（既定値は肝臓=Liver） |
+
+生成される疑似CT画像は、円形の体輪郭の中に楕円形の「肝臓様」ROIを持つだけの単純な
+合成データです（実データではありません）。中央付近の断面でROIが最大になり上下端で
+消えるようにしてあるので、実際の臓器のように一部の断面にしか写らない状態を再現して
+います。
+
+このスクリプトで実際に生成したサンプル一式を`samples/seg_sample/`に同梱しています
+（`source_ct/`に疑似CT 20枚、直下に`segmentation.dcm`）。`output/`と違いgit管理下に
+置いてあるので、都度スクリプトを実行しなくてもすぐに動作確認に使えます。
 
 ## 生成したファイルの取り込み方
 
